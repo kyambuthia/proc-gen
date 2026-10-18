@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useRef, useState } from "react";
-import { Vector3 } from "three";
-import { createBrain } from "./character.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CanvasTexture, SRGBColorSpace, Vector3 } from "three";
+import { createBrain, GRAVITY, throwVelocity } from "./character.js";
 import { poseAngles } from "./pose.js";
 import { createWorld, OBSTACLES, PLAYER, RAGDOLL_FOOT_OFFSET } from "./physics.js";
 
@@ -26,6 +26,7 @@ function Part({ part, character, debug }) {
   const mesh = useRef();
   const material = useRef();
   const flash = useRef();
+  const gun = useRef();
   const isHead = part.kind === "sphere";
   const hasGun = character.kind === "player" && part.name === "foreArmR";
 
@@ -39,6 +40,7 @@ function Part({ part, character, debug }) {
     material.current.emissiveIntensity = clamp(st.flash / 0.25, 0, 1) * 0.9;
     if (!isHead) material.current.color.set(st.mode === "dead" ? "#555a63" : COLORS[character.kind]);
     if (flash.current) flash.current.visible = st.muzzleT > 0;
+    if (gun.current) gun.current.visible = !st.holding;
   });
 
   const shape = () => (
@@ -65,7 +67,7 @@ function Part({ part, character, debug }) {
         emissiveIntensity={0}
       />
       {hasGun && (
-        <>
+        <group ref={gun}>
           <mesh position={[0, -0.3, 0.01]} castShadow>
             <boxGeometry args={[0.05, 0.24, 0.09]} />
             <meshStandardMaterial color="#222831" />
@@ -74,9 +76,106 @@ function Part({ part, character, debug }) {
             <sphereGeometry args={[0.08, 12, 8]} />
             <meshBasicMaterial color="#ffd36b" />
           </mesh>
-        </>
+        </group>
       )}
     </mesh>
+  );
+}
+
+// A soccer-ball skin drawn at runtime: white with a dark patch at each of the icosahedron's 12
+// vertices (the pentagons), stretched toward the poles to survive the sphere mapping.
+function makeBallTexture() {
+  const w = 512;
+  const h = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const g = canvas.getContext("2d");
+  g.fillStyle = "#f3f3ee";
+  g.fillRect(0, 0, w, h);
+  const t = (1 + Math.sqrt(5)) / 2;
+  const verts = [
+    [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t],
+    [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+  ];
+  g.fillStyle = "#14171c";
+  for (const v of verts) {
+    const len = Math.hypot(...v);
+    const [x, y, z] = v.map((c) => c / len);
+    const lat = Math.asin(y);
+    const px = (0.5 + Math.atan2(z, x) / (2 * Math.PI)) * w;
+    const py = (0.5 - lat / Math.PI) * h;
+    const ry = 30;
+    const rx = Math.min(ry / Math.max(Math.cos(lat), 0.25), 90);
+    for (const dx of [-w, 0, w]) {
+      g.beginPath();
+      g.ellipse(px + dx, py, rx, ry, 0, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  return texture;
+}
+
+function Ball({ world }) {
+  const mesh = useRef();
+  const texture = useMemo(makeBallTexture, []);
+
+  useFrame(() => {
+    const p = world.ball.body.GetPosition();
+    const q = world.ball.body.GetRotation();
+    mesh.current.position.set(p.GetX(), p.GetY(), p.GetZ());
+    mesh.current.quaternion.set(q.GetX(), q.GetY(), q.GetZ(), q.GetW());
+  });
+
+  return (
+    <mesh ref={mesh} castShadow>
+      <sphereGeometry args={[world.ball.radius, 32, 24]} />
+      <meshStandardMaterial map={texture} roughness={0.55} />
+    </mesh>
+  );
+}
+
+// While carrying the ball: dots along the arc a throw at the crosshair would follow.
+const PREVIEW_DOTS = 22;
+function ThrowPreview({ game, world }) {
+  const group = useRef();
+  const { camera } = useThree();
+  const dir = useMemo(() => new Vector3(), []);
+
+  useFrame(() => {
+    const hero = game.hero;
+    const holding = hero?.state.holding && hero.state.mode === "active";
+    group.current.visible = !!holding;
+    if (!holding) return;
+    camera.getWorldDirection(dir);
+    const origin = [camera.position.x, camera.position.y, camera.position.z];
+    const d = [dir.x, dir.y, dir.z];
+    const seen = world.raycast(origin, d, 200, hero);
+    const aim = seen ? seen.point : origin.map((v, i) => v + d[i] * 40);
+    const from = hero.holdPoint();
+    const v = throwVelocity(from, aim);
+    // Spread the dots over the flight time to the aim point (or a second, if it is not reached).
+    const flat = Math.hypot(aim[0] - from[0], aim[2] - from[2]);
+    const speedFlat = Math.hypot(v[0], v[2]) || 1;
+    const total = Math.min(flat / speedFlat, 2.5);
+    group.current.children.forEach((dot, i) => {
+      const t = (total * (i + 1)) / PREVIEW_DOTS;
+      dot.position.set(from[0] + v[0] * t, from[1] + v[1] * t - 0.5 * GRAVITY * t * t, from[2] + v[2] * t);
+      dot.visible = dot.position.y > 0.02;
+    });
+  });
+
+  return (
+    <group ref={group} visible={false}>
+      {Array.from({ length: PREVIEW_DOTS }, (_, i) => (
+        <mesh key={i}>
+          <sphereGeometry args={[0.045, 8, 6]} />
+          <meshBasicMaterial color="#fff3a8" depthTest={false} transparent opacity={0.85} toneMapped={false} />
+        </mesh>
+      ))}
+    </group>
   );
 }
 
@@ -359,11 +458,21 @@ function Scene({ world, onHud }) {
       const d = [dir.x, dir.y, dir.z];
       const seen = world.raycast(origin, d, 200, game.hero);
       const aimPoint = seen ? seen.point : origin.map((v, i) => v + d[i] * 80);
+      if (game.hero.state.holding) {
+        if (game.hero.throwBall(aimPoint)) game.event = "Threw the ball";
+        return;
+      }
       const result = game.hero.shoot(aimPoint);
       if (!result) return;
       game.tracers.push({ from: result.from, to: result.to, hit: !!result.hit, age: 0 });
       const h = result.hit;
-      const what = h?.character ? `shot ${h.character.name} in the ${h.part}` : h ? "shot hit the scenery" : "missed";
+      const what = h?.character
+        ? `shot ${h.character.name} in the ${h.part}`
+        : h?.kind === "ball"
+          ? "shot the ball"
+          : h
+            ? "shot hit the scenery"
+            : "missed";
       game.event = `#${++game.shots} ${what}`;
     }
 
@@ -439,6 +548,17 @@ function Scene({ world, onHud }) {
         setDebug(game.debug);
       }
       if (e.code === "KeyF" && game.hero?.punch(world.characters)) game.event = "Punch";
+      if (e.code === "KeyK" && game.hero?.kick()) game.event = "Kick";
+      if (e.code === "KeyG" && game.hero) {
+        const did = game.hero.toggleHold();
+        game.event = did === "pick up" ? "Picked up the ball" : did === "drop" ? "Dropped the ball" : "Nothing to pick up";
+      }
+      if (e.code === "KeyB") {
+        // Put the ball back in front of the player.
+        const base = game.hero ? game.hero.state : { pos: [0, 0, 4], heading: Math.PI };
+        world.ball.reset([base.pos[0] + Math.sin(base.heading) * 2.2, 0.6, base.pos[2] + Math.cos(base.heading) * 2.2]);
+        game.event = "Ball reset";
+      }
     }
     const onKeyUp = (e) => game.keys.delete(e.code);
     const onBlur = () => game.keys.clear();
@@ -594,12 +714,23 @@ function Scene({ world, onHud }) {
         down: alive.filter((n) => n.state.mode !== "active").length,
         dead: game.npcs.length - alive.length,
         hostile: game.hostile,
+        holding: !!game.hero?.state.holding,
         event: game.event,
         debug: game.debug
           ? {
               fps: game.fps,
               steps: game.steps,
-              bodies: world.characters.length * 10,
+              bodies: world.characters.length * 10 + 1,
+              ball: (() => {
+                const b = world.ball.position();
+                const v = world.ball.velocity();
+                const me = game.hero ? game.hero.state.pos : null;
+                return {
+                  speed: Math.hypot(...v),
+                  height: b[1],
+                  dist: me ? Math.hypot(b[0] - me[0], b[2] - me[2]) : null,
+                };
+              })(),
               rows: [game.hero, ...game.npcs].filter(Boolean).map((c) => {
                 const st = c.state;
                 return {
@@ -654,6 +785,8 @@ function Scene({ world, onHud }) {
           {debug && <DebugOverlay character={c} />}
         </group>
       ))}
+      <Ball world={world} />
+      <ThrowPreview game={game} world={world} />
       <Tracers tracers={game.tracers} />
     </>
   );
@@ -698,7 +831,7 @@ export default function App() {
       <div className="crosshair" />
       <div className="hint">
         WASD move &middot; Shift run &middot; Space jump &middot; click shoot &middot; F punch &middot; R go limp / get up
-        &middot; E add NPC &middot; H hostile NPCs &middot; T animated / active &middot; ` debug view &middot; drag to look, wheel to zoom
+        &middot; K kick &middot; G pick up / drop ball &middot; B reset ball &middot; E add NPC &middot; H hostile NPCs &middot; T animated / active &middot; ` debug view &middot; drag to look, wheel to zoom
         {hud && (
           <div className="status">
             Mode: <strong>{hud.mode}</strong>
@@ -709,6 +842,7 @@ export default function App() {
             )}{" "}
             &middot; NPCs: <strong>{hud.npcs}</strong> alive ({hud.down} down), {hud.dead} dead &middot; Hostile:{" "}
             <strong>{hud.hostile ? "on" : "off"}</strong>
+            {hud.holding && <> &middot; <strong>holding the ball: click to throw, G to drop</strong></>}
             {hud.event && <> &middot; {hud.event}</>}
           </div>
         )}
@@ -717,6 +851,7 @@ export default function App() {
             {`DEBUG  ${hud.debug.fps.toFixed(0)} fps · ${hud.debug.steps} physics step(s)/frame · ${hud.debug.bodies} bodies\n`}
             {`cyan = hit shapes · yellow = centre of mass · magenta = capture point · blue = velocity\n`}
             {`green/orange dot = stance/swing foot target · orange ring + line = predicted landing · white ring = next step\n`}
+            {`ball    ${hud.debug.ball.speed.toFixed(1).padStart(4)} m/s  height ${hud.debug.ball.height.toFixed(2)}${hud.debug.ball.dist === null ? "" : `  ${hud.debug.ball.dist.toFixed(1)} m from you`}\n`}
             {hud.debug.rows
               .map(
                 (r) =>

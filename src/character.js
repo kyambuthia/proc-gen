@@ -38,7 +38,27 @@ const IDENTITY = [0, 0, 0, 1];
 
 export const PUNCH_IMPULSE = 320; // N*s
 export const BULLET_IMPULSE = 45; // N*s
+export const HOLD_REACH = 1.7; // how close the ball must be to pick it up
+export const KICK_IMPULSE = 13; // N*s on a 1 kg ball, i.e. about 13 m/s
+export const BALL_SHOT_IMPULSE = 10;
 export const KNOCKDOWN_SPEED = 1.5; // m/s of whole-body velocity change inside the impact window
+
+// Launch velocity that carries a ball from `from` to `to` on a low arc, under gravity g. The
+// speed is the least that reaches the target, with some margin, so near targets get a gentle lob
+// and far ones a hard throw. Falls back to a lofted throw when the target is out of range.
+export function throwVelocity(from, to, g = GRAVITY, margin = 1.5, maxSpeed = 30) {
+  const dx = to[0] - from[0];
+  const dz = to[2] - from[2];
+  const dy = to[1] - from[1];
+  const d = Math.hypot(dx, dz);
+  if (d < 0.05) return [0, Math.min(maxSpeed, Math.sqrt(2 * g * Math.max(dy, 0.5))), 0];
+  const vMin = Math.sqrt(g * (dy + Math.hypot(d, dy)));
+  const v = clamp(vMin * margin, 7, maxSpeed);
+  const v2 = v * v;
+  const disc = v2 * v2 - g * (g * d * d + 2 * dy * v2);
+  const pitch = disc >= 0 ? Math.atan((v2 - Math.sqrt(disc)) / (g * d)) : Math.atan2(dy, d) + 0.35;
+  return [(dx / d) * v * Math.cos(pitch), v * Math.sin(pitch), (dz / d) * v * Math.cos(pitch)];
+}
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const smooth = (s) => {
@@ -233,6 +253,14 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
     punchT: -1,
     punchCool: 0,
     punchHit: false,
+    kickT: -1,
+    kickCool: 0,
+    kickHit: false,
+    holding: false,
+    holdBlend: 0,
+    holdFrom: null,
+    throwT: -1,
+    throwAim: null,
     gunCool: 0,
     aimT: 0,
     aimYaw: 0,
@@ -461,8 +489,27 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
     return pose;
   }
 
-  // Arm overrides for punching and aiming; they replace whatever the gait chose for that arm.
+  // Arm overrides for punching and aiming, and the right leg for kicking; they replace whatever
+  // the gait chose for those limbs.
   function armOverrides(pose) {
+    if (st.kickT >= 0) {
+      const t = st.kickT;
+      let hip;
+      let knee;
+      if (t < 0.12) {
+        hip = lerp(0, 0.7, smooth(t / 0.12));
+        knee = lerp(0.2, 1.4, smooth(t / 0.12));
+      } else if (t < 0.26) {
+        const k = smooth((t - 0.12) / 0.14);
+        hip = lerp(0.7, -1.3, k);
+        knee = lerp(1.4, 0.1, k);
+      } else {
+        const k = smooth((t - 0.26) / 0.24);
+        hip = lerp(-1.3, 0, k);
+        knee = lerp(0.1, 0.2, k);
+      }
+      Object.assign(pose, leg(1, qAxis(X, hip), knee));
+    }
     if (st.punchT >= 0) {
       const t = st.punchT;
       let shoulder;
@@ -481,6 +528,36 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
       }
       Object.assign(pose, arm(1, shoulder, 0, elbow));
       Object.assign(pose, arm(-1, -shoulder * 0.3, 0, -0.9));
+    } else if (st.throwT >= 0 || st.holding) {
+      // Both hands on the ball, in front of the chest. A throw pulls it in, then pushes it out.
+      let reach = -1.35;
+      let elbow = -0.25;
+      if (st.throwT >= 0) {
+        const t = st.throwT;
+        if (t < 0.12) {
+          reach = lerp(-1.35, -0.8, smooth(t / 0.12));
+          elbow = lerp(-0.25, -1.4, smooth(t / 0.12));
+        } else if (t < 0.26) {
+          const k = smooth((t - 0.12) / 0.14);
+          reach = lerp(-0.8, -1.8, k);
+          elbow = lerp(-1.4, 0, k);
+        } else {
+          const k = smooth((t - 0.26) / 0.3);
+          reach = lerp(-1.8, -1.35, k);
+          elbow = lerp(0, -0.25, k);
+        }
+      }
+      // Blend in from wherever the arms were when the ball was picked up.
+      const b = st.throwT >= 0 ? 1 : smooth(st.holdBlend);
+      const inward = 0.5;
+      for (const side of [-1, 1]) {
+        const key = side === -1 ? "L" : "R";
+        const a = arm(side, reach, -side * inward, elbow);
+        const cur = pose[`upperArm${key}`];
+        const target = a[`upperArm${key}`];
+        pose[`upperArm${key}`] = b >= 1 ? target : qSlerp(cur, target, b);
+        pose[`foreArm${key}`] = lerp(pose[`foreArm${key}`], elbow, b);
+      }
     } else if (st.aimT > 0) {
       Object.assign(pose, arm(1, -(Math.PI / 2 + st.aimPitch), 0, 0));
       Object.assign(pose, arm(-1, -0.5, -0.1, -0.9));
@@ -522,6 +599,8 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
 
   function knockDown(duration, why = "hit") {
     if (st.mode === "dead") return;
+    st.kickT = -1;
+    drop();
     st.knockedBy = why;
     st.mode = "down";
     st.downTime = 0;
@@ -532,6 +611,7 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
   }
 
   function die() {
+    drop();
     st.mode = "dead";
     st.hp = 0;
     st.punchT = -1;
@@ -735,6 +815,107 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
     return best;
   }
 
+  // Swing the right leg at the ball. The ball only moves if it is in front of the foot when the
+  // leg comes through, so a kick can miss.
+  function kick() {
+    const ball = world.ball;
+    if (!ball || st.holding || ball.holder || st.mode !== "active" || st.kickCool > 0 || !st.grounded) return false;
+    st.kickT = 0;
+    st.kickHit = false;
+    st.kickCool = 0.7;
+    // Turn toward a nearby ball so a kick does not need precise aim.
+    const b = ball.position();
+    const dx = b[0] - st.pos[0];
+    const dz = b[2] - st.pos[2];
+    if (Math.hypot(dx, dz) < 3) st.heading = Math.atan2(dx, dz);
+    return true;
+  }
+
+  function resolveKick() {
+    st.kickHit = true;
+    const ball = world.ball;
+    const { fwd, side } = frameAxes();
+    const b = ball.position();
+    const rel = [b[0] - st.pos[0], b[1] - st.pos[1], b[2] - st.pos[2]];
+    const ahead = rel[0] * fwd[0] + rel[2] * fwd[2];
+    const lateral = rel[0] * side[0] + rel[2] * side[2];
+    // In front of the kicking foot, and low enough to be at foot or knee height.
+    if (ahead < 0.05 || ahead > 1.7 || Math.abs(lateral) > 0.8 || rel[1] > 0.1) return false;
+    // Aim slightly toward where the ball sits relative to the body, plus a little loft.
+    const dir = [fwd[0] + side[0] * lateral * 0.15, 0.28, fwd[2] + side[2] * lateral * 0.15];
+    const len = Math.hypot(...dir);
+    // Off-centre, below the middle, so it leaves with some backspin.
+    ball.kick(dir.map((v) => v / len), KICK_IMPULSE, [b[0], b[1] - ball.radius * 0.35, b[2]]);
+    return true;
+  }
+
+  // ---- carrying the ball
+
+  const holdPoint = () => {
+    const o = qRot(st.q, [0, 0.2, 0.62]);
+    return [st.pos[0] + o[0], st.pos[1] + o[1], st.pos[2] + o[2]];
+  };
+
+  function pickUp() {
+    const ball = world.ball;
+    if (!ball || ball.holder || st.mode !== "active" || !st.grounded) return false;
+    const b = ball.position();
+    const dx = b[0] - st.pos[0];
+    const dz = b[2] - st.pos[2];
+    // Anything from the floor up to about shoulder height; the torso centre is 1.4 m up.
+    if (Math.hypot(dx, dz) > HOLD_REACH || b[1] > st.pos[1] + 0.7) return false;
+    st.heading = Math.atan2(dx, dz);
+    st.holding = true;
+    st.holdBlend = 0;
+    st.holdFrom = b;
+    ball.hold(self);
+    return true;
+  }
+
+  // Let go of the ball, carrying on with the holder's own velocity.
+  function drop() {
+    if (!st.holding) return false;
+    st.holding = false;
+    st.throwT = -1;
+    if (world.ball.holder === self) world.ball.release([st.vel[0], st.vel[1], st.vel[2]]);
+    return true;
+  }
+
+  function toggleHold() {
+    if (st.holding) return drop() ? "drop" : null;
+    return pickUp() ? "pick up" : null;
+  }
+
+  // Throw at a world point; the ball leaves the hands partway through the arm swing.
+  function throwBall(aimPoint) {
+    if (!st.holding || st.throwT >= 0 || st.mode !== "active") return null;
+    st.throwT = 0;
+    st.throwAim = aimPoint;
+    st.aimYaw = Math.atan2(aimPoint[0] - st.pos[0], aimPoint[2] - st.pos[2]);
+    st.aimT = 0.5;
+    return { from: holdPoint(), to: aimPoint };
+  }
+
+  function releaseThrow() {
+    const from = holdPoint();
+    const v = throwVelocity(from, st.throwAim);
+    const carry = [st.vel[0], st.vel[1], st.vel[2]];
+    st.holding = false;
+    world.ball.release([v[0] + carry[0] * 0.5, v[1] + carry[1] * 0.5, v[2] + carry[2] * 0.5], [-3 * v[2] / 10, 0, 3 * v[0] / 10]);
+    st.throwAim = null;
+  }
+
+  function updateHeld(dt) {
+    st.holdBlend = Math.min(1, st.holdBlend + dt / 0.25);
+    const target = holdPoint();
+    const k = smooth(st.holdBlend);
+    const from = st.holdFrom ?? target;
+    world.ball.holdAt(
+      [lerp(from[0], target[0], k), lerp(from[1], target[1], k), lerp(from[2], target[2], k)],
+      [st.vel[0], st.vel[1], st.vel[2]],
+    );
+  }
+
   function muzzle() {
     const p = byName.foreArmR.GetPosition();
     const q = byName.foreArmR.GetRotation();
@@ -766,6 +947,7 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
         damage: head ? 50 : result.part.startsWith("thigh") || result.part.startsWith("shin") ? 15 : 25,
       });
     }
+    if (result?.kind === "ball") world.ball.kick(dir, BALL_SHOT_IMPULSE, result.point);
     impulse(ids.torso, [-dir[0] * 6, -dir[1] * 6, -dir[2] * 6]);
     return { from, to, hit: result };
   }
@@ -777,6 +959,7 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
     st.flash = Math.max(0, st.flash - dt);
     st.punchCool = Math.max(0, st.punchCool - dt);
     st.gunCool = Math.max(0, st.gunCool - dt);
+    st.kickCool = Math.max(0, st.kickCool - dt);
     st.aimT = Math.max(0, st.aimT - dt);
     st.muzzleT = Math.max(0, st.muzzleT - dt);
     st.impactSpeed *= Math.exp(-dt / 0.6);
@@ -785,7 +968,18 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
       if (st.punchT >= 0.15 && !st.punchHit && st.mode === "active") resolvePunch();
       if (st.punchT > 0.45) st.punchT = -1;
     }
+    if (st.throwT >= 0) {
+      st.throwT += dt;
+      if (st.throwT >= 0.16 && st.holding && st.mode === "active") releaseThrow();
+      if (st.throwT > 0.56) st.throwT = -1;
+    }
+    if (st.kickT >= 0) {
+      st.kickT += dt;
+      if (st.kickT >= 0.2 && !st.kickHit && st.mode === "active") resolveKick();
+      if (st.kickT > 0.5) st.kickT = -1;
+    }
     readState(dt);
+    if (st.holding) updateHeld(dt);
     if (st.mode === "dead") return;
     if (st.mode === "down") return updateDown(dt);
     if (st.mode === "getup") return updateGetUp(dt);
@@ -803,6 +997,11 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
     update,
     hit,
     punch,
+    kick,
+    toggleHold,
+    holdPoint,
+    drop,
+    throwBall,
     shoot,
     setLimp,
     muzzle,

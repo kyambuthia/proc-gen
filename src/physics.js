@@ -5,7 +5,9 @@ import { qRot, rayVsBox, rayVsCapsule, rayVsSphere } from "./math.js";
 
 const LAYER_STATIC = 0;
 const LAYER_RAGDOLL = 1;
-const NUM_LAYERS = 2;
+const LAYER_BALL = 2;
+const LAYER_HELD = 3; // the ball while someone carries it: collides with nothing
+const NUM_LAYERS = 4;
 const NUM_BROAD_PHASE_LAYERS = 2;
 
 // Body parts of a standing figure, in metres, relative to the feet-level origin.
@@ -49,6 +51,10 @@ export const PLAYER = { halfHeight: 0.75, radius: 0.3, centerHeight: 1.05 };
 // Lowest point of the ragdoll pose relative to its origin (bottom of the shins).
 export const RAGDOLL_FOOT_OFFSET = 0.26;
 
+// A soccer ball: light enough to be kicked about, bouncy, with continuous collision so a hard
+// kick cannot tunnel through a wall or a leg.
+export const BALL = { radius: 0.18, mass: 1, restitution: 0.8, spawn: [1.2, 0.6, 2.4] };
+
 const GRAVITY = -20;
 const WALK_SPEED = 2.6;
 const RUN_SPEED = 6.5;
@@ -61,10 +67,15 @@ export async function createWorld() {
   objectFilter.EnableCollision(LAYER_STATIC, LAYER_RAGDOLL);
   // Different ragdolls collide with each other; parts of one ragdoll never do (see the group filter).
   objectFilter.EnableCollision(LAYER_RAGDOLL, LAYER_RAGDOLL);
+  // The ball is hit by scenery and by every ragdoll part, but not by other balls.
+  objectFilter.EnableCollision(LAYER_BALL, LAYER_STATIC);
+  objectFilter.EnableCollision(LAYER_BALL, LAYER_RAGDOLL);
 
   const broadPhase = new Jolt.BroadPhaseLayerInterfaceTable(NUM_LAYERS, NUM_BROAD_PHASE_LAYERS);
   broadPhase.MapObjectToBroadPhaseLayer(LAYER_STATIC, new Jolt.BroadPhaseLayer(0));
   broadPhase.MapObjectToBroadPhaseLayer(LAYER_RAGDOLL, new Jolt.BroadPhaseLayer(1));
+  broadPhase.MapObjectToBroadPhaseLayer(LAYER_BALL, new Jolt.BroadPhaseLayer(1));
+  broadPhase.MapObjectToBroadPhaseLayer(LAYER_HELD, new Jolt.BroadPhaseLayer(1));
 
   const settings = new Jolt.JoltSettings();
   settings.mObjectLayerPairFilter = objectFilter;
@@ -121,6 +132,79 @@ export async function createWorld() {
     );
     bodies.AddBody(box.GetID(), Jolt.EActivation_DontActivate);
   }
+
+  const ballSettings = new Jolt.BodyCreationSettings(
+    new Jolt.SphereShape(BALL.radius),
+    rvec(BALL.spawn),
+    new Jolt.Quat(0, 0, 0, 1),
+    Jolt.EMotionType_Dynamic,
+    LAYER_BALL,
+  );
+  ballSettings.mRestitution = BALL.restitution;
+  ballSettings.mFriction = 0.6;
+  ballSettings.mLinearDamping = 0.1;
+  ballSettings.mAngularDamping = 0.7;
+  ballSettings.mMotionQuality = Jolt.EMotionQuality_LinearCast;
+  const ballBody = bodies.CreateBody(ballSettings);
+  ballBody.GetMotionProperties().ScaleToMass(BALL.mass);
+  bodies.AddBody(ballBody.GetID(), Jolt.EActivation_Activate);
+
+  const ballVec = new Jolt.Vec3(0, 0, 0);
+  const ballPoint = new Jolt.RVec3(0, 0, 0);
+  const ball = {
+    body: ballBody,
+    radius: BALL.radius,
+    position() {
+      const p = ballBody.GetPosition();
+      return [p.GetX(), p.GetY(), p.GetZ()];
+    },
+    velocity() {
+      const v = ballBody.GetLinearVelocity();
+      return [v.GetX(), v.GetY(), v.GetZ()];
+    },
+    // Hit the ball with an impulse (N*s), optionally off-centre so it picks up spin.
+    kick(dir, impulse, point = null) {
+      ballVec.Set(dir[0] * impulse, dir[1] * impulse, dir[2] * impulse);
+      if (point) {
+        ballPoint.Set(point[0], point[1], point[2]);
+        bodies.AddImpulse(ballBody.GetID(), ballVec, ballPoint);
+      } else {
+        bodies.AddImpulse(ballBody.GetID(), ballVec);
+      }
+    },
+    holder: null,
+    // Carrying: the ball stops colliding and floats, and its position is set by the carrier.
+    hold(by) {
+      ball.holder = by;
+      bodies.SetObjectLayer(ballBody.GetID(), LAYER_HELD);
+      bodies.SetGravityFactor(ballBody.GetID(), 0);
+    },
+    holdAt(pos, velocity) {
+      ballPoint.Set(pos[0], pos[1], pos[2]);
+      bodies.SetPositionAndRotation(ballBody.GetID(), ballPoint, new Jolt.Quat(0, 0, 0, 1), Jolt.EActivation_Activate);
+      ballVec.Set(velocity[0], velocity[1], velocity[2]);
+      bodies.SetLinearVelocity(ballBody.GetID(), ballVec);
+    },
+    // Let go, with the given velocity (the carrier's, plus whatever a throw adds).
+    release(velocity, spin = [0, 0, 0]) {
+      ball.holder = null;
+      bodies.SetObjectLayer(ballBody.GetID(), LAYER_BALL);
+      bodies.SetGravityFactor(ballBody.GetID(), 1);
+      ballVec.Set(velocity[0], velocity[1], velocity[2]);
+      ballPoint.Set(spin[0], spin[1], spin[2]);
+      bodies.SetLinearAndAngularVelocity(ballBody.GetID(), ballVec, ballPoint);
+    },
+    reset(at = BALL.spawn) {
+      if (ball.holder) {
+        ball.holder.drop?.();
+        ball.holder = null;
+      }
+      ballPoint.Set(at[0], at[1], at[2]);
+      bodies.SetPositionAndRotation(ballBody.GetID(), ballPoint, new Jolt.Quat(0, 0, 0, 1), Jolt.EActivation_Activate);
+      ballVec.Set(0, 0, 0);
+      bodies.SetLinearAndAngularVelocity(ballBody.GetID(), ballVec, ballVec);
+    },
+  };
 
   function makeShape(part) {
     if (part.kind === "box") return new Jolt.BoxShape(vec(part.half));
@@ -236,6 +320,9 @@ export async function createWorld() {
 
   function step(dt) {
     jolt.Step(dt, dt > 1 / 55 ? 2 : 1);
+    // A ball that fell off the edge or rolled far away is put back.
+    const b = ball.position();
+    if (b[1] < -5 || Math.abs(b[0]) > 48 || Math.abs(b[2]) > 48 || !Number.isFinite(b[0] + b[1] + b[2])) ball.reset();
   }
 
   function createPlayer(position) {
@@ -303,7 +390,7 @@ export async function createWorld() {
 
   // ---------------------------------------------------------------- characters and ray casts
 
-  const world = { characters: [], ctx: { Jolt, bodies, physics } };
+  const world = { characters: [], ball, ctx: { Jolt, bodies, physics } };
 
   // Hit shapes mirror the physics shapes, so a ray test agrees with what is drawn.
   function rayVsPart(o, d, part) {
@@ -334,6 +421,7 @@ export async function createWorld() {
     };
     if (d[1] < -1e-6) consider(-o[1] / d[1], { kind: "scenery" });
     for (const box of OBSTACLES) consider(rayVsBox(o, d, box.pos, [0, 0, 0, 1], box.half), { kind: "scenery" });
+    consider(rayVsSphere(o, d, ball.position(), ball.radius), { kind: "ball" });
     for (const character of world.characters) {
       if (character === exclude) continue;
       for (const part of character.ragdoll.parts) {
@@ -351,6 +439,7 @@ export async function createWorld() {
   }
 
   function removeCharacter(character) {
+    if (ball.holder === character) character.drop();
     const i = world.characters.indexOf(character);
     if (i >= 0) world.characters.splice(i, 1);
     destroyRagdoll(character.ragdoll);
