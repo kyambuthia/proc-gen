@@ -1,6 +1,8 @@
 import { poseAngles } from "./pose.js";
 import { qAxis, qConj, qMul, qRot, qSlerp } from "./math.js";
+import { nav } from "./nav.js";
 import { groundHeight, pushOutOfWalls } from "./scenery.js";
+import { createNavAgent } from "./steer.js";
 
 // An active-ragdoll character: joint motors pose the body while a few assists keep it upright.
 //
@@ -1019,12 +1021,26 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
   return self;
 }
 
-// Simple wandering / chasing brain for NPCs. Returns an input generator.
+// A first brain for NPCs: wander between real destinations, and chase and punch the player
+// when hostile. Movement goes through the navigation agent, so NPCs path around walls and jump
+// onto blocks instead of walking into them.
 export function createBrain(self, world, { origin = [0, 0] } = {}) {
+  const agent = createNavAgent(self, world);
   let timer = 0;
-  let dir = [0, 0];
   let attackCool = 1 + Math.random();
-  return function think(dt, hostile) {
+
+  function pickWanderGoal() {
+    for (let tries = 0; tries < 12; tries++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 2 + Math.random() * 7;
+      const x = origin[0] + Math.sin(a) * r;
+      const z = origin[1] + Math.cos(a) * r;
+      if (nav.walkable(x, z) && nav.heightAt(x, z) < 0.3) return [x, z];
+    }
+    return null;
+  }
+
+  function think(dt, hostile) {
     const st = self.state;
     timer -= dt;
     attackCool -= dt;
@@ -1033,27 +1049,26 @@ export function createBrain(self, world, { origin = [0, 0] } = {}) {
       const dx = player.state.pos[0] - st.pos[0];
       const dz = player.state.pos[2] - st.pos[2];
       const d = Math.hypot(dx, dz);
-      if (d < 14) {
+      if (d < 30) {
         if (d > 1.3) {
-          dir = [dx / d, dz / d];
-        } else {
-          dir = [0, 0];
-          if (attackCool <= 0 && self.punch([player])) attackCool = 1.4 + Math.random();
+          agent.goTo(player.state.pos[0], player.state.pos[2]);
+          return agent.update(dt, { run: d > 9, speed: 0.85 });
         }
-        return { x: dir[0] * 0.8, z: dir[1] * 0.8, run: false, jump: false };
+        agent.stop();
+        if (attackCool <= 0 && self.punch([player])) attackCool = 1.4 + Math.random();
+        return { x: 0, z: 0, run: false, jump: false };
       }
     }
-    if (timer <= 0) {
-      timer = 2 + Math.random() * 4;
-      const roam = Math.random() < 0.5;
-      const a = Math.random() * Math.PI * 2;
-      dir = roam ? [Math.sin(a), Math.cos(a)] : [0, 0];
-      // Drift back toward home when too far away.
-      const hx = origin[0] - st.pos[0];
-      const hz = origin[1] - st.pos[2];
-      const hd = Math.hypot(hx, hz);
-      if (hd > 10) dir = [hx / hd, hz / hd];
+    if (timer <= 0 || agent.arrived || agent.failed) {
+      timer = 3 + Math.random() * 5;
+      const goal = Math.random() < 0.55 ? pickWanderGoal() : null;
+      if (goal) agent.goTo(goal[0], goal[1]);
+      else agent.stop();
+      agent.arrived = false;
+      agent.failed = false;
     }
-    return { x: dir[0] * 0.5, z: dir[1] * 0.5, run: false, jump: false };
-  };
+    return agent.update(dt, { speed: 0.5 });
+  }
+  think.agent = agent;
+  return think;
 }
