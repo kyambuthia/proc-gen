@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ragdoll</title>
+    <style>
+      html, body, #root { margin: 0; height: 100%; background: #14161a; }
+      .hint { position: fixed; top: 12px; left: 12px; right: 12px; color: #c9ced6; font: 13px/1.5 system-ui, sans-serif; pointer-events: none; }
+      .hint .status { margin-top: 4px; color: #e6e9ee; }
+      .hint .debug { margin: 6px 0 0; padding: 6px 8px; width: max-content; max-width: 100%; background: rgba(8, 10, 14, 0.72); border-left: 3px solid #19f0c8; color: #bff7ec; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; overflow: hidden; }
+      .fault { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: min(90vw, 760px); padding: 10px 14px; background: #7a1f1f; color: #fff; border: 1px solid #ff8a8a; border-radius: 6px; font: 13px/1.4 system-ui, sans-serif; z-index: 10; }
+      .fault button { margin-left: 12px; padding: 3px 10px; cursor: pointer; }
+      .crosshair { position: fixed; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; pointer-events: none; }
+      .crosshair::before, .crosshair::after { content: ""; position: absolute; background: rgba(255, 255, 255, 0.85); box-shadow: 0 0 2px #000; }
+      .crosshair::before { left: 8px; top: 0; width: 2px; height: 18px; }
+      .crosshair::after { left: 0; top: 8px; width: 18px; height: 2px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
