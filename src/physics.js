@@ -392,6 +392,16 @@ export async function createWorld() {
 
   const world = { characters: [], ball, ctx: { Jolt, bodies, physics } };
 
+  // A tiny event bus: gunshots and hits are announced here so NPCs can hear and react to them.
+  const listeners = new Set();
+  world.on = (fn) => {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  };
+  world.emit = (event) => {
+    for (const fn of listeners) fn(event);
+  };
+
   // Hit shapes mirror the physics shapes, so a ray test agrees with what is drawn.
   function rayVsPart(o, d, part) {
     const p = part.body.GetPosition();

@@ -5,6 +5,9 @@ export const OBSTACLES = [
   { pos: [-5, 0.4, -4], half: [2, 0.4, 1] },
   { pos: [-5, 0.8, -7], half: [2, 0.8, 1] },
   { pos: [0, 0.6, -9], half: [4, 0.6, 0.4] },
+  // Tall walls: too high to jump, and high enough to hide behind.
+  { pos: [10, 1.5, -8], half: [0.4, 1.5, 3] },
+  { pos: [-12, 1.5, 6], half: [3, 1.5, 0.4] },
 ];
 
 // Height of the scenery under (x, z), ignoring anything above `below`.

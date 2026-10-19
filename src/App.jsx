@@ -1,18 +1,20 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CanvasTexture, SRGBColorSpace, Vector3 } from "three";
-import { createBrain, GRAVITY, throwVelocity } from "./character.js";
+import { createBrain } from "./ai.js";
+import { GRAVITY, throwVelocity } from "./character.js";
 import { poseAngles } from "./pose.js";
 import { createWorld, OBSTACLES, PLAYER, RAGDOLL_FOOT_OFFSET } from "./physics.js";
 
 const MAX_NPCS = 8;
 const STEP = 1 / 60;
 const NPC_SPAWNS = [
-  [-3, 0],
-  [0, -1],
-  [2.5, 1.5],
-  [-5, 2],
+  { at: [-3, 0], role: "brawler" },
+  { at: [0, -1], role: "civilian" },
+  { at: [2.5, 1.5], role: "brawler" },
+  { at: [-5, 2], role: "civilian" },
 ];
+const ROLE_POOL = ["brawler", "brawler", "civilian"];
 const IDLE = { x: 0, z: 0, run: false, jump: false };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -399,9 +401,9 @@ function Scene({ world, onHud }) {
       return c;
     };
     const hero = spawn([0, RAGDOLL_FOOT_OFFSET + 0.02, 4], { kind: "player", yaw: Math.PI });
-    const npcs = NPC_SPAWNS.map(([x, z]) => {
+    const npcs = NPC_SPAWNS.map(({ at: [x, z], role }) => {
       const c = spawn([x, RAGDOLL_FOOT_OFFSET + 0.02, z], { kind: "npc", yaw: Math.random() * 6 });
-      c.brain = createBrain(c, world, { origin: [x, z] });
+      c.brain = createBrain(c, world, { origin: [x, z], role });
       return c;
     });
     const game = {
@@ -525,7 +527,7 @@ function Scene({ world, onHud }) {
       const x = base.pos[0] + Math.sin(base.heading) * 3;
       const z = base.pos[2] + Math.cos(base.heading) * 3;
       const c = game.spawn([x, RAGDOLL_FOOT_OFFSET + 0.02, z], { kind: "npc", yaw: base.heading + Math.PI });
-      c.brain = createBrain(c, world, { origin: [x, z] });
+      c.brain = createBrain(c, world, { origin: [x, z], role: ROLE_POOL[Math.floor(Math.random() * ROLE_POOL.length)] });
       game.npcs.push(c);
       // Make room by removing the oldest, preferring ones that are already dead.
       while (game.npcs.length > MAX_NPCS) {
@@ -740,6 +742,7 @@ function Scene({ world, onHud }) {
                   hp: Math.round(st.hp),
                   speed: Math.hypot(st.vcom[0], st.vcom[2]),
                   gait: st.mode === "active" ? (st.grounded ? `${st.gait.mode} #${st.gait.steps}` : "air") : "-",
+                  mind: c.brain ? `${c.brain.info.role} ${c.brain.info.behaviour}${c.brain.info.aware ? "*" : ""}` : "",
                   impact: st.impactSpeed,
                   warn: st.tiltBad > 0 || st.reachBad > 0 ? `tilt ${st.tiltBad.toFixed(1)} reach ${st.reachBad.toFixed(1)}` : "",
                 };
@@ -855,7 +858,7 @@ export default function App() {
             {hud.debug.rows
               .map(
                 (r) =>
-                  `${r.name.padEnd(7)} ${r.mode.padEnd(7)} hp ${String(r.hp).padStart(3)}  v ${r.speed.toFixed(1).padStart(4)} m/s  gait ${r.gait.padEnd(9)} impact ${r.impact.toFixed(2)} ${r.warn}`,
+                  `${r.name.padEnd(7)} ${r.mode.padEnd(7)} hp ${String(r.hp).padStart(3)}  v ${r.speed.toFixed(1).padStart(4)} m/s  gait ${r.gait.padEnd(9)} impact ${r.impact.toFixed(2)} ${r.mind} ${r.warn}`,
               )
               .join("\n")}
           </pre>
