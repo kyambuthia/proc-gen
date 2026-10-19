@@ -13,6 +13,8 @@
       .fault button { margin-left: 12px; padding: 3px 10px; cursor: pointer; }
       .hint .waves { margin-top: 4px; color: #ffd36b; }
       .banner { position: fixed; left: 0; right: 0; top: 30%; text-align: center; color: #fff; font: 600 clamp(22px, 5vw, 44px)/1.2 system-ui, sans-serif; text-shadow: 0 2px 10px #000; pointer-events: none; }
+      .minimap { position: fixed; right: 12px; bottom: 12px; width: 168px; height: 168px; border: 1px solid #3a414d; border-radius: 4px; pointer-events: none; }
+      @media (max-width: 520px) { .minimap { width: 112px; height: 112px; } }
       .crosshair { position: fixed; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; pointer-events: none; }
       .crosshair.hit::before, .crosshair.hit::after { animation: hitmark 0.18s ease-out; }
       .crosshair.kill::before, .crosshair.kill::after { animation: killmark 0.4s ease-out; }

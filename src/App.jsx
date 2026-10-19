@@ -460,6 +460,53 @@ function Rig({ rig, color }) {
   );
 }
 
+// Top-down map of the arena, north up: scenery by height, the player with a view wedge, NPCs
+// by role colour (dead ones dim), and medkits. Redrawn a few times a second.
+const MAP_RANGE = 25; // metres from the centre to the map edge
+function drawMinimap(canvas, { characters, hero, yaw, medkits }) {
+  const g = canvas.getContext("2d");
+  const size = canvas.width;
+  const k = size / (2 * MAP_RANGE);
+  const px = (x) => size / 2 + x * k;
+  const pz = (z) => size / 2 + z * k;
+  g.clearRect(0, 0, size, size);
+  g.fillStyle = "rgba(8, 10, 14, 0.72)";
+  g.fillRect(0, 0, size, size);
+  for (const o of OBSTACLES) {
+    g.fillStyle = boxColor(o);
+    g.fillRect(px(o.pos[0] - o.half[0]), pz(o.pos[2] - o.half[2]), o.half[0] * 2 * k, o.half[2] * 2 * k);
+  }
+  g.fillStyle = "#2fbf5a";
+  for (const m of medkits ?? []) g.fillRect(px(m.x) - 3, pz(m.z) - 3, 6, 6);
+  for (const c of characters) {
+    if (c === hero) continue;
+    const dead = c.state.mode === "dead";
+    g.globalAlpha = dead ? 0.35 : 1;
+    g.fillStyle = bodyColor(c);
+    g.beginPath();
+    g.arc(px(c.state.pos[0]), pz(c.state.pos[2]), dead ? 2.5 : 3.5, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+  if (hero) {
+    const x = px(hero.state.pos[0]);
+    const z = pz(hero.state.pos[2]);
+    // The camera looks along (-sin yaw, -cos yaw); on the map +x is right and +z is down.
+    const a = Math.atan2(-Math.cos(yaw), -Math.sin(yaw));
+    g.fillStyle = "rgba(255, 255, 255, 0.18)";
+    g.beginPath();
+    g.moveTo(x, z);
+    g.arc(x, z, 26, a - 0.5, a + 0.5);
+    g.fill();
+    g.fillStyle = COLORS.player;
+    g.strokeStyle = "#fff";
+    g.beginPath();
+    g.arc(x, z, 4.5, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+  }
+}
+
 // Restart a CSS animation class on an element (removing and re-adding alone does not replay it).
 function pulse(el, cls) {
   if (!el) return;
@@ -874,6 +921,9 @@ function Scene({ world, onHud, fx }) {
     game.hudTimer += delta;
     if (game.hudTimer > 0.2) {
       game.hudTimer = 0;
+      if (fx.minimap.current) {
+        drawMinimap(fx.minimap.current, { characters: world.characters, hero: game.hero, yaw: game.yaw, medkits: game.waves.medkits });
+      }
       const alive = game.npcs.filter((n) => n.state.mode !== "dead");
       onHud({
         mode: game.describeMode(),
@@ -978,7 +1028,8 @@ export default function App() {
   const crosshair = useRef();
   const hurt = useRef();
   const arrow = useRef();
-  const [fx] = useState(() => ({ crosshair, hurt, arrow }));
+  const minimap = useRef();
+  const [fx] = useState(() => ({ crosshair, hurt, arrow, minimap }));
   const [fault, setFault] = useState(null);
   // The arena must be in place before the world builds its static bodies.
   const [seed] = useState(() => loadArena(new URLSearchParams(window.location.search).get("seed")));
@@ -1021,6 +1072,7 @@ export default function App() {
       )}
       <div className="crosshair" ref={crosshair} />
       <div className="hurt" ref={hurt} />
+      <canvas className="minimap" ref={minimap} width={168} height={168} />
       <div className="hurt-arrow" ref={arrow} />
       {hud?.waves.banner && <div className="banner">{hud.waves.banner}</div>}
       <div className="hint">
