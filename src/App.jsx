@@ -687,6 +687,8 @@ function Scene({ world, onHud, fx }) {
 
     // Swap between the animated figure and the active ragdoll, in place.
     function toggleMode() {
+      // Wave mode needs the ragdoll player; swapping to the animated figure ends the run.
+      if (game.hero && game.waves.active) toggleWaves();
       if (game.hero) {
         const st = game.hero.state;
         game.heading = st.heading;
@@ -1095,7 +1097,7 @@ export default function App() {
             {hud.event && <> &middot; {hud.event}</>}
             {hud.waves.wave !== undefined && (
               <div className="waves">
-                Wave <strong>{hud.waves.wave}</strong> &middot; enemies left <strong>{hud.waves.left}</strong> &middot; kills{" "}
+                Wave <strong>{hud.waves.wave || "get ready"}</strong> &middot; enemies left <strong>{hud.waves.left}</strong> &middot; kills{" "}
                 <strong>{hud.waves.kills}</strong> &middot; score <strong>{hud.waves.score}</strong> &middot; best {hud.waves.best}
               </div>
             )}
