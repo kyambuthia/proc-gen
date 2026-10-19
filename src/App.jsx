@@ -750,6 +750,7 @@ function Scene({ world, onHud, fx }) {
       if (e.code === "KeyH") game.hostile = !game.hostile;
       if (e.code === "KeyN") newArena();
       if (e.code === "KeyV") toggleWaves();
+      if (e.code === "KeyP") game.paused = !game.paused;
       if (e.code === "Backquote") {
         game.debug = !game.debug;
         setDebug(game.debug);
@@ -837,7 +838,8 @@ function Scene({ world, onHud, fx }) {
 
   useFrame((_, delta) => {
     game.fps = damp(game.fps, 1 / Math.max(delta, 1e-3), 3, delta);
-    game.accumulator += Math.min(delta, 0.1);
+    // Paused: the camera still follows the mouse, but no time passes in the world.
+    game.accumulator = game.paused ? 0 : game.accumulator + Math.min(delta, 0.1);
     game.steps = 0;
     while (game.accumulator >= STEP) {
       game.steps++;
@@ -851,7 +853,7 @@ function Scene({ world, onHud, fx }) {
     }
 
     // The player respawns a few seconds after dying.
-    if (game.hero?.state.mode === "dead") {
+    if (game.hero?.state.mode === "dead" && !game.paused) {
       game.deadTimer += delta;
       if (game.deadTimer > 3) {
         game.deadTimer = 0;
@@ -932,6 +934,7 @@ function Scene({ world, onHud, fx }) {
         down: alive.filter((n) => n.state.mode !== "active").length,
         dead: game.npcs.length - alive.length,
         hostile: game.hostile || game.waves.active,
+        paused: !!game.paused,
         waves: (() => {
           const w = game.waves;
           if (w.score > game.best) {
@@ -1074,10 +1077,10 @@ export default function App() {
       <div className="hurt" ref={hurt} />
       <canvas className="minimap" ref={minimap} width={168} height={168} />
       <div className="hurt-arrow" ref={arrow} />
-      {hud?.waves.banner && <div className="banner">{hud.waves.banner}</div>}
+      {hud?.paused ? <div className="banner">Paused (P to resume)</div> : hud?.waves.banner && <div className="banner">{hud.waves.banner}</div>}
       <div className="hint">
         WASD move &middot; Shift run &middot; Space jump &middot; click shoot &middot; F punch &middot; R go limp / get up
-        &middot; K kick &middot; G pick up / drop ball &middot; B reset ball &middot; E add NPC &middot; H hostile NPCs &middot; V wave mode &middot; N new arena &middot; T animated / active &middot; ` debug view &middot; drag to look, wheel to zoom
+        &middot; K kick &middot; G pick up / drop ball &middot; B reset ball &middot; E add NPC &middot; H hostile NPCs &middot; V wave mode &middot; N new arena &middot; P pause &middot; T animated / active &middot; ` debug view &middot; drag to look, wheel to zoom
         {hud && (
           <div className="status">
             Arena: <strong>{seed ?? "classic"}</strong> &middot; Mode: <strong>{hud.mode}</strong>
