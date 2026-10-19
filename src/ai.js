@@ -262,13 +262,39 @@ export function createBrain(self, world, { origin = [0, 0], role = "brawler", pe
         }
         return IDLE;
       }
-      agent.goTo(fx, fz);
+      const [gx, gz] = d > 2.2 ? flankPoint(fx, fz, d) : [fx, fz];
+      agent.goTo(gx, gz);
       return agent.update(dt, { run: d > 9 || (p.aggression > 0.85 && d > 5), speed: 0.9 });
     },
     exit() {
       agent.stop();
     },
   };
+
+  // Where to head while closing in, so a pack surrounds the target instead of queueing behind
+  // one another. Each chaser keeps its own bearing around the target (the side it is coming
+  // from) but is pushed away from the bearings of other chasers near the same target, then
+  // aims at a point on that bearing that draws in as it gets close.
+  const flankSide = Math.random() < 0.5 ? -1 : 1; // which way to break a dead-even tie
+  function flankPoint(fx, fz, d) {
+    let bearing = Math.atan2(st.pos[0] - fx, st.pos[2] - fz);
+    let push = 0;
+    for (const other of world.characters) {
+      if (other === self || other.state.mode === "dead" || other.brain?.info.behaviour !== "chase") continue;
+      const o = other.state.pos;
+      if (Math.hypot(o[0] - fx, o[2] - fz) > 14) continue;
+      const theirs = Math.atan2(o[0] - fx, o[2] - fz);
+      const diff = Math.atan2(Math.sin(bearing - theirs), Math.cos(bearing - theirs));
+      // Allies within 100 degrees push this bearing away, harder the closer they are in angle.
+      if (Math.abs(diff) < 1.75) push += (diff === 0 ? flankSide : Math.sign(diff)) * (1.75 - Math.abs(diff));
+    }
+    bearing += clamp(push, -1.4, 1.4);
+    const r = clamp(d * 0.55, 1.2, 5);
+    const x = fx + Math.sin(bearing) * r;
+    const z = fz + Math.cos(bearing) * r;
+    // A slot inside a wall or up on a block is no good: fall back to going straight in.
+    return nav.walkable(x, z) && Math.abs(nav.heightAt(x, z) - nav.heightAt(fx, fz)) < 0.3 ? [x, z] : [fx, fz];
+  }
 
   // Get away from the threat: run to the reachable spot that is furthest from it.
   const flee = {
