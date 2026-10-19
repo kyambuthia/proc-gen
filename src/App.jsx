@@ -217,6 +217,42 @@ function ThrowPreview({ game, world }) {
   );
 }
 
+// Wave-mode medkits: a white box with a green cross, bobbing and turning so it catches the eye.
+const MEDKIT_SLOTS = 3;
+function Medkits({ waves }) {
+  const refs = useRef([]);
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    refs.current.forEach((g, i) => {
+      if (!g) return;
+      const m = waves.medkits?.[i];
+      g.visible = !!m;
+      if (!m) return;
+      g.position.set(m.x, 0.35 + Math.sin(t * 2.5 + i) * 0.08, m.z);
+      g.rotation.y = t * 1.5;
+    });
+  });
+  return Array.from({ length: MEDKIT_SLOTS }, (_, i) => (
+    <group key={i} ref={(g) => (refs.current[i] = g)} visible={false}>
+      <mesh castShadow>
+        <boxGeometry args={[0.4, 0.3, 0.4]} />
+        <meshStandardMaterial color="#f2f2ee" />
+      </mesh>
+      {/* A cross on the lid and a band around the sides. */}
+      {[
+        [[0, 0.16, 0], [0.3, 0.02, 0.09]],
+        [[0, 0.16, 0], [0.09, 0.02, 0.3]],
+        [[0, 0, 0], [0.41, 0.07, 0.41]],
+      ].map(([pos, size], k) => (
+        <mesh key={k} position={pos}>
+          <boxGeometry args={size} />
+          <meshStandardMaterial color="#2fbf5a" emissive="#2fbf5a" emissiveIntensity={0.5} />
+        </mesh>
+      ))}
+    </group>
+  ));
+}
+
 function HealthBar({ character }) {
   const group = useRef();
   const fill = useRef();
@@ -424,7 +460,15 @@ function Rig({ rig, color }) {
   );
 }
 
-function Scene({ world, onHud }) {
+// Restart a CSS animation class on an element (removing and re-adding alone does not replay it).
+function pulse(el, cls) {
+  if (!el) return;
+  el.classList.remove("hit", "kill", "on");
+  void el.offsetWidth;
+  el.classList.add(cls);
+}
+
+function Scene({ world, onHud, fx }) {
   const { camera, gl } = useThree();
   const [roster, setRoster] = useState([]);
   const [debug, setDebug] = useState(true);
@@ -506,6 +550,29 @@ function Scene({ world, onHud }) {
 
   const refreshRoster = () => setRoster([game.hero, ...game.npcs].filter(Boolean));
   game.rosterChanged = refreshRoster;
+
+  // Hit markers on the crosshair, and a flash plus an arrow toward whoever hurt the player.
+  useEffect(
+    () =>
+      world.on((ev) => {
+        if (ev.type === "death" && ev.by && ev.by === game.hero) pulse(fx.crosshair.current, "kill");
+        if (ev.type !== "hit" || !game.hero) return;
+        if (ev.by === game.hero && ev.victim !== game.hero) pulse(fx.crosshair.current, "hit");
+        if (ev.victim === game.hero) {
+          pulse(fx.hurt.current, "on");
+          if (ev.by && fx.arrow.current) {
+            // Direction to the attacker in screen terms: 0 = straight ahead (up), clockwise positive.
+            const dx = ev.by.state.pos[0] - game.hero.state.pos[0];
+            const dz = ev.by.state.pos[2] - game.hero.state.pos[2];
+            const ahead = -Math.sin(game.yaw) * dx - Math.cos(game.yaw) * dz;
+            const right = Math.cos(game.yaw) * dx - Math.sin(game.yaw) * dz;
+            fx.arrow.current.style.setProperty("--angle", `${Math.atan2(right, ahead)}rad`);
+            pulse(fx.arrow.current, "on");
+          }
+        }
+      }),
+    [world, game, fx],
+  );
 
   // Every shot, the player's or an NPC's, leaves a tracer.
   useEffect(
@@ -900,6 +967,7 @@ function Scene({ world, onHud }) {
       <Ball world={world} />
       <ThrowPreview game={game} world={world} />
       <Tracers tracers={game.tracers} />
+      <Medkits waves={game.waves} />
     </>
   );
 }
@@ -907,6 +975,10 @@ function Scene({ world, onHud }) {
 export default function App() {
   const [world, setWorld] = useState(null);
   const [hud, setHud] = useState(null);
+  const crosshair = useRef();
+  const hurt = useRef();
+  const arrow = useRef();
+  const [fx] = useState(() => ({ crosshair, hurt, arrow }));
   const [fault, setFault] = useState(null);
   // The arena must be in place before the world builds its static bodies.
   const [seed] = useState(() => loadArena(new URLSearchParams(window.location.search).get("seed")));
@@ -939,7 +1011,7 @@ export default function App() {
     <>
       <Canvas shadows camera={{ position: [0, 4, 11], fov: 55 }}>
         <color attach="background" args={["#14161a"]} />
-        {world && <Scene world={world} onHud={setHud} />}
+        {world && <Scene world={world} onHud={setHud} fx={fx} />}
       </Canvas>
       {fault && (
         <div className="fault">
@@ -947,7 +1019,9 @@ export default function App() {
           <button onClick={() => window.location.reload()}>Reload</button>
         </div>
       )}
-      <div className="crosshair" />
+      <div className="crosshair" ref={crosshair} />
+      <div className="hurt" ref={hurt} />
+      <div className="hurt-arrow" ref={arrow} />
       {hud?.waves.banner && <div className="banner">{hud.waves.banner}</div>}
       <div className="hint">
         WASD move &middot; Shift run &middot; Space jump &middot; click shoot &middot; F punch &middot; R go limp / get up

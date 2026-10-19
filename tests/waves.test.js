@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBrain } from "../src/ai.js";
-import { BREAK, FIRST_BREAK, createWaveDirector, waveRoster } from "../src/waves.js";
+import { BREAK, FIRST_BREAK, MEDKIT_HEAL, createWaveDirector, waveRoster } from "../src/waves.js";
 import { IDLE, makeWorld, spawn, STEP } from "./sim.js";
 import { RAGDOLL_FOOT_OFFSET } from "../src/physics.js";
 
@@ -85,4 +85,26 @@ test("the run ends when the player dies, and stop clears its enemies", async () 
   director.stop();
   assert.equal(npcs.length, 0);
   assert.equal(world.characters.length, 1);
+});
+
+test("clearing every second wave drops a medkit that heals only a hurt player", async () => {
+  const { hero, npcs, director, tick, kill } = await setup();
+  director.start();
+  for (let wave = 1; wave <= 2; wave++) {
+    tick((wave === 1 ? FIRST_BREAK : BREAK) + 0.1);
+    tick(8);
+    for (const c of [...npcs]) kill(c);
+    tick(0.1);
+  }
+  assert.equal(director.medkits.length, 1);
+  const kit = director.medkits[0];
+  // Stand on it (the bodies are not stepped here, so placing the read position is enough).
+  hero.state.pos = [kit.x, hero.state.pos[1], kit.z];
+  hero.state.hp = hero.state.hpMax;
+  tick(0.05);
+  assert.equal(director.medkits.length, 1, "full health: it stays on the floor");
+  hero.state.hp = 50;
+  tick(0.05);
+  assert.equal(director.medkits.length, 0);
+  assert.equal(hero.state.hp, 50 + MEDKIT_HEAL);
 });

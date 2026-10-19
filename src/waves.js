@@ -17,12 +17,26 @@ const HEAL = 35;
 const KILL_SCORE = 100;
 const HEAD_BONUS = 50;
 const WAVE_BONUS = 250;
+export const MEDKIT_HEAL = 30;
+const MEDKIT_REACH = 1.0; // how close the player's torso must come to take one
+const MAX_MEDKITS = 3;
 
 // The enemies in wave n (1-based): it grows by one each wave, and every other wave adds a gunner.
 export function waveRoster(n) {
   const count = Math.min(14, 2 + n);
   const gunners = Math.min(count - 1, Math.floor(n / 2));
   return [...Array(gunners).fill("gunner"), ...Array(count - gunners).fill("brawler")];
+}
+
+// A ground-level open cell between `min` and `max` metres from `from`.
+function pickMedkitPoint(from, rand) {
+  for (let i = 0; i < 40; i++) {
+    const a = rand() * Math.PI * 2;
+    const r = 5 + rand() * 9;
+    const p = nav.nearestWalkable(from[0] + Math.sin(a) * r, from[2] + Math.cos(a) * r, 4);
+    if (p && nav.heightAt(p[0], p[1]) < 0.05) return p;
+  }
+  return null;
 }
 
 // Open ground far from `from`, near the arena edge when possible.
@@ -51,6 +65,7 @@ export function createWaveDirector({ world, spawn, remove, player, rand = Math.r
     timer: 0,
     queue: [], // roles still to arrive this wave
     enemies: new Set(),
+    medkits: [], // { x, z, id }: health on the floor, put down during breaks
     banner: null, // { text, until }
     time: 0,
   };
@@ -68,7 +83,7 @@ export function createWaveDirector({ world, spawn, remove, player, rand = Math.r
 
   d.start = () => {
     d.clear();
-    Object.assign(d, { active: true, over: false, wave: 0, score: 0, kills: 0, phase: "break", timer: FIRST_BREAK, queue: [] });
+    Object.assign(d, { active: true, over: false, wave: 0, score: 0, kills: 0, phase: "break", timer: FIRST_BREAK, queue: [], medkits: [] });
     say("Survive the waves", FIRST_BREAK);
   };
 
@@ -80,7 +95,7 @@ export function createWaveDirector({ world, spawn, remove, player, rand = Math.r
 
   d.stop = () => {
     d.clear();
-    Object.assign(d, { active: false, over: false, phase: "idle", queue: [] });
+    Object.assign(d, { active: false, over: false, phase: "idle", queue: [], medkits: [] });
     d.banner = null;
   };
 
@@ -95,6 +110,15 @@ export function createWaveDirector({ world, spawn, remove, player, rand = Math.r
       say(`Game over: wave ${d.wave}, score ${d.score}`, 6);
       return;
     }
+    // Walking over a medkit heals, but only someone who is hurt picks one up.
+    const hp = hero.state.pos;
+    d.medkits = d.medkits.filter((m) => {
+      const near = Math.hypot(m.x - hp[0], m.z - hp[2]) < MEDKIT_REACH;
+      if (!near || hero.state.hp >= hero.state.hpMax) return true;
+      hero.state.hp = Math.min(hero.state.hpMax, hero.state.hp + MEDKIT_HEAL);
+      say(`+${MEDKIT_HEAL} hp`, 1);
+      return false;
+    });
     d.timer -= dt;
     if (d.phase === "break") {
       if (d.timer <= 0) {
@@ -127,6 +151,11 @@ export function createWaveDirector({ world, spawn, remove, player, rand = Math.r
       hero.state.hp = Math.min(hero.state.hpMax, hero.state.hp + HEAL);
       d.phase = "break";
       d.timer = BREAK;
+      // Every second wave leaves a medkit somewhere nearby.
+      if (d.wave % 2 === 0 && d.medkits.length < MAX_MEDKITS) {
+        const p = pickMedkitPoint(hp, rand);
+        if (p) d.medkits.push({ x: p[0], z: p[1], id: d.wave });
+      }
       say(`Wave ${d.wave} cleared  +${HEAL} hp`);
     }
   };
