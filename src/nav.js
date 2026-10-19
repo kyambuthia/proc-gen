@@ -114,20 +114,51 @@ export function createNav(obstacles = OBSTACLES) {
 
   // Is the straight line between two points free of walls and of steps that need a jump?
   // Cells beside box faces count as not clear, so shortcuts do not hug walls.
+  // Every cell the segment passes through is visited (a grid walk, not point samples), so a
+  // line cannot slip across the corner of a blocked cell.
   function lineClear(ax, az, bx, bz, strict = true) {
-    const len = Math.hypot(bx - ax, bz - az);
-    const steps = Math.max(1, Math.ceil(len / 0.25));
-    let prev = heightAt(ax, az);
-    for (let s = 0; s <= steps; s++) {
-      const x = ax + ((bx - ax) * s) / steps;
-      const z = az + ((bz - az) * s) / steps;
-      const ix = cellOf(x);
-      const iz = cellOf(z);
-      if (!inGrid(ix, iz) || blocked[idx(ix, iz)]) return false;
-      if (strict && penalty[idx(ix, iz)] > 0) return false;
-      const h = height[idx(ix, iz)];
-      if (Math.abs(h - prev) > STEP_UP) return false;
+    let ix = cellOf(ax);
+    let iz = cellOf(az);
+    const ex = cellOf(bx);
+    const ez = cellOf(bz);
+    const dx = bx - ax;
+    const dz = bz - az;
+    const sx = Math.sign(dx);
+    const sz = Math.sign(dz);
+    // Distance along the segment (0..1) to the next cell boundary in x and z, and per cell.
+    const edgeX = (ix + (sx > 0 ? 1 : 0)) * CELL - HALF;
+    const edgeZ = (iz + (sz > 0 ? 1 : 0)) * CELL - HALF;
+    let tx = sx ? (edgeX - ax) / dx : Infinity;
+    let tz = sz ? (edgeZ - az) / dz : Infinity;
+    const stepX = sx ? CELL / Math.abs(dx) : Infinity;
+    const stepZ = sz ? CELL / Math.abs(dz) : Infinity;
+    let prev = null;
+    const visit = (cx, cz) => {
+      if (!inGrid(cx, cz) || blocked[idx(cx, cz)]) return false;
+      if (strict && penalty[idx(cx, cz)] > 0) return false;
+      const h = height[idx(cx, cz)];
+      if (prev !== null && Math.abs(h - prev) > STEP_UP) return false;
       prev = h;
+      return true;
+    };
+    if (!visit(ix, iz)) return false;
+    for (let guard = 0; (ix !== ex || iz !== ez) && guard < 4 * N; guard++) {
+      if (Math.abs(tx - tz) < 1e-9) {
+        // Through a corner exactly: both side cells count, so no squeezing between two walls.
+        if (!visit(ix + sx, iz) || !visit(ix, iz + sz)) return false;
+        prev = height[idx(ix, iz)];
+        ix += sx;
+        iz += sz;
+        tx += stepX;
+        tz += stepZ;
+      } else if (tx < tz) {
+        ix += sx;
+        tx += stepX;
+      } else {
+        iz += sz;
+        tz += stepZ;
+      }
+      if (!visit(ix, iz)) return false;
     }
     return true;
   }
