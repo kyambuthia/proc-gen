@@ -10,17 +10,20 @@ const MAX_NPCS = 8;
 const STEP = 1 / 60;
 const NPC_SPAWNS = [
   { at: [-3, 0], role: "brawler" },
-  { at: [0, -1], role: "civilian" },
-  { at: [2.5, 1.5], role: "brawler" },
-  { at: [-5, 2], role: "civilian" },
+  { at: [0, -1], role: "gunner" },
+  { at: [2.5, 1.5], role: "civilian" },
+  { at: [-5, 2], role: "brawler" },
 ];
-const ROLE_POOL = ["brawler", "brawler", "civilian"];
+const ROLE_POOL = ["brawler", "gunner", "civilian"];
 const IDLE = { x: 0, z: 0, run: false, jump: false };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const damp = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
 
 const COLORS = { player: "#5cc46e", npc: "#4d8fd6" };
+// NPC body colour by role, so a gunner can be told from a brawler at a glance.
+const ROLE_COLORS = { brawler: "#4d8fd6", gunner: "#9a5fd0", civilian: "#c9b458" };
+const bodyColor = (c) => (c.kind === "player" ? COLORS.player : ROLE_COLORS[c.brain?.personality.role] ?? COLORS.npc);
 
 // One physics body part. It turns red briefly when its character is hit and grey once dead.
 // The player's right forearm carries the gun; the muzzle flash lights up while it fires.
@@ -30,7 +33,7 @@ function Part({ part, character, debug }) {
   const flash = useRef();
   const gun = useRef();
   const isHead = part.kind === "sphere";
-  const hasGun = character.kind === "player" && part.name === "foreArmR";
+  const hasGun = character.state.armed && part.name === "foreArmR";
 
   useFrame(() => {
     if (part.dead) return;
@@ -40,7 +43,7 @@ function Part({ part, character, debug }) {
     mesh.current.quaternion.set(q.GetX(), q.GetY(), q.GetZ(), q.GetW());
     const st = character.state;
     material.current.emissiveIntensity = clamp(st.flash / 0.25, 0, 1) * 0.9;
-    if (!isHead) material.current.color.set(st.mode === "dead" ? "#555a63" : COLORS[character.kind]);
+    if (!isHead) material.current.color.set(st.mode === "dead" ? "#555a63" : bodyColor(character));
     if (flash.current) flash.current.visible = st.muzzleT > 0;
     if (gun.current) gun.current.visible = !st.holding;
   });
@@ -64,7 +67,7 @@ function Part({ part, character, debug }) {
       )}
       <meshStandardMaterial
         ref={material}
-        color={isHead ? "#f0c9a0" : COLORS[character.kind]}
+        color={isHead ? "#f0c9a0" : bodyColor(character)}
         emissive="#ff1a1a"
         emissiveIntensity={0}
       />
@@ -214,6 +217,7 @@ function HealthBar({ character }) {
 
 // Short-lived bullet traces and impact flashes, from a small pool.
 const TRACER_LIFE = 0.12;
+const TRACER_POOL = 16;
 function Tracers({ tracers }) {
   const refs = useRef([]);
 
@@ -230,13 +234,14 @@ function Tracers({ tracers }) {
       g.children[0].position.set(...mid);
       g.children[0].scale.set(1, 1, len);
       g.children[0].lookAt(...t.to);
+      g.children[0].material.color.set(t.npc ? "#ff6b5a" : "#ffe08a");
       g.children[1].position.set(...t.to);
       g.children[1].visible = t.hit;
       g.children[1].scale.setScalar(1 - t.age / TRACER_LIFE);
     });
   });
 
-  return Array.from({ length: 8 }, (_, i) => (
+  return Array.from({ length: TRACER_POOL }, (_, i) => (
     <group key={i} ref={(g) => (refs.current[i] = g)} visible={false}>
       <mesh>
         <boxGeometry args={[0.02, 0.02, 1]} />
@@ -402,7 +407,7 @@ function Scene({ world, onHud }) {
     };
     const hero = spawn([0, RAGDOLL_FOOT_OFFSET + 0.02, 4], { kind: "player", yaw: Math.PI });
     const npcs = NPC_SPAWNS.map(({ at: [x, z], role }) => {
-      const c = spawn([x, RAGDOLL_FOOT_OFFSET + 0.02, z], { kind: "npc", yaw: Math.random() * 6 });
+      const c = spawn([x, RAGDOLL_FOOT_OFFSET + 0.02, z], { kind: "npc", yaw: Math.random() * 6, armed: role === "gunner" });
       c.brain = createBrain(c, world, { origin: [x, z], role });
       return c;
     });
@@ -446,6 +451,17 @@ function Scene({ world, onHud }) {
   });
 
   const refreshRoster = () => setRoster([game.hero, ...game.npcs].filter(Boolean));
+
+  // Every shot, the player's or an NPC's, leaves a tracer.
+  useEffect(
+    () =>
+      world.on((ev) => {
+        if (ev.type !== "shot") return;
+        game.tracers.push({ from: ev.from, to: ev.to, hit: !!ev.hit, age: 0, npc: ev.by.kind !== "player" });
+        if (game.tracers.length > TRACER_POOL) game.tracers.shift();
+      }),
+    [world, game],
+  );
   useEffect(() => {
     refreshRoster();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -466,7 +482,6 @@ function Scene({ world, onHud }) {
       }
       const result = game.hero.shoot(aimPoint);
       if (!result) return;
-      game.tracers.push({ from: result.from, to: result.to, hit: !!result.hit, age: 0 });
       const h = result.hit;
       const what = h?.character
         ? `shot ${h.character.name} in the ${h.part}`
@@ -526,8 +541,9 @@ function Scene({ world, onHud }) {
       const base = game.hero ? game.hero.state : { pos: [0, 0, 4], heading: Math.PI };
       const x = base.pos[0] + Math.sin(base.heading) * 3;
       const z = base.pos[2] + Math.cos(base.heading) * 3;
-      const c = game.spawn([x, RAGDOLL_FOOT_OFFSET + 0.02, z], { kind: "npc", yaw: base.heading + Math.PI });
-      c.brain = createBrain(c, world, { origin: [x, z], role: ROLE_POOL[Math.floor(Math.random() * ROLE_POOL.length)] });
+      const role = ROLE_POOL[Math.floor(Math.random() * ROLE_POOL.length)];
+      const c = game.spawn([x, RAGDOLL_FOOT_OFFSET + 0.02, z], { kind: "npc", yaw: base.heading + Math.PI, armed: role === "gunner" });
+      c.brain = createBrain(c, world, { origin: [x, z], role });
       game.npcs.push(c);
       // Make room by removing the oldest, preferring ones that are already dead.
       while (game.npcs.length > MAX_NPCS) {

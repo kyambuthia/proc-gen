@@ -43,6 +43,7 @@ export function createPersonality(role = "brawler") {
     reaction: between(r.reaction),
     sight: between(r.sight),
     hearing: 35,
+    armed: role === "gunner",
   };
 }
 
@@ -61,6 +62,8 @@ export function createBrain(self, world, { origin = [0, 0], role = "brawler", pe
     alert: null, // { x, z, time }: somewhere that made a noise
     provokedUntil: 0,
     heardShotAt: -99,
+    hurtAt: -99, // when this NPC last took damage
+    coverUntil: 0, // stay behind cover until then
   };
 
   const findTarget = () => world.characters.find((c) => c.kind === "player" && c.state.mode !== "dead") ?? null;
@@ -99,6 +102,7 @@ export function createBrain(self, world, { origin = [0, 0], role = "brawler", pe
       if (ev.victim === self && ev.by) {
         // Hit by someone: now we know who, and we are angry about it.
         if (ev.by.kind === "player") mem.provokedUntil = t + 25;
+        mem.hurtAt = t;
         mem.lastSeen = { pos: [...ev.by.state.pos], time: t };
       } else if (ev.by?.kind === "player" && ev.victim !== self) {
         // Saw (or heard) someone else get hit by the player: go and look.
@@ -241,6 +245,7 @@ export function createBrain(self, world, { origin = [0, 0], role = "brawler", pe
       const bravery = clamp(p.courage + ctx.hpFrac - 0.6, 0, 1);
       s *= 0.25 + 0.75 * bravery;
       if (!ctx.aware) s *= 0.75;
+      if (p.armed && ctx.d > 2.5) s *= 0.35; // a gunner would rather shoot than close in
       return s;
     },
     enter() {
@@ -315,7 +320,187 @@ export function createBrain(self, world, { origin = [0, 0], role = "brawler", pe
     return best ? [best.x, best.z] : null;
   }
 
-  const behaviours = [wander, investigate, chase, flee];
+
+  // ---- ranged combat
+
+  // Is there a clear line from the gun to the target? Allies and walls in the way say no, so
+  // an NPC never fires through a friend.
+  function lineOfFire(target) {
+    const from = self.muzzle();
+    const tp = target.state.pos;
+    const aim = [tp[0], tp[1] + 0.1, tp[2]];
+    const dx = aim[0] - from[0];
+    const dy = aim[1] - from[1];
+    const dz = aim[2] - from[2];
+    const dist = Math.hypot(dx, dy, dz) || 1;
+    const ray = world.raycast(from, [dx / dist, dy / dist, dz / dist], dist, self);
+    return !ray || ray.character === target || ray.kind === "ball" || ray.dist >= dist - 0.3;
+  }
+
+  // Where the NPC actually aims: the target's chest plus an error that grows with distance and
+  // a poor aim trait, and shrinks the longer it has been lined up on the target.
+  function aimPointFor(target, aimTime) {
+    const tp = target.state.pos;
+    const d = Math.hypot(tp[0] - st.pos[0], tp[2] - st.pos[2]);
+    const warm = lerp(1.8, 0.6, clamp(aimTime / 1.2, 0, 1));
+    const moving = Math.hypot(target.state.vcom[0], target.state.vcom[2]) > 3 ? 1.3 : 1;
+    const r = (0.15 + (1 - p.accuracy) * 0.9 + 0.025 * d) * warm * moving;
+    const a = Math.random() * Math.PI * 2;
+    const e = Math.sqrt(Math.random()) * r;
+    return [tp[0] + Math.cos(a) * e, tp[1] + 0.2 + (Math.random() - 0.5) * e, tp[2] + Math.sin(a) * e];
+  }
+
+  // Cells that the threat cannot see (scenery blocks the ray from its eye to chest height there),
+  // nearest first. Standing next to a wall on the far side is what we are after.
+  function findCover(threat) {
+    const eye = [threat[0], threat[1] + 0.55, threat[2]];
+    let best = null;
+    for (let dz = -14; dz <= 14; dz += 1) {
+      for (let dx = -14; dx <= 14; dx += 1) {
+        const x = st.pos[0] + dx;
+        const z = st.pos[2] + dz;
+        if (!nav.walkable(x, z) || nav.heightAt(x, z) > 0.3) continue;
+        const dThreat = Math.hypot(x - threat[0], z - threat[2]);
+        if (dThreat < 5 || dThreat > 24) continue;
+        const chest = [x, 1.45, z];
+        const ray = [chest[0] - eye[0], chest[1] - eye[1], chest[2] - eye[2]];
+        const len = Math.hypot(...ray);
+        const hit = world.raycast(eye, ray.map((v) => v / len), len, null, { sceneryOnly: true });
+        if (!hit || hit.dist > len - 0.4) continue; // visible from the threat: not cover
+        // Cheap and close beats far away; staying near the preferred range is a small bonus.
+        const cost = Math.hypot(dx, dz) + 0.3 * Math.abs(dThreat - 10);
+        if (!best || cost < best.cost) best = { cost, x, z };
+      }
+    }
+    return best ? [best.x, best.z] : null;
+  }
+
+  // Keep a distance, strafe, and fire in short bursts at a target it can actually hit.
+  const shoot = {
+    name: "shoot",
+    aimTime: 0,
+    burstLeft: 0,
+    shotT: 0,
+    strafeT: 0,
+    strafeSide: 1,
+    newBurst() {
+      this.burstLeft = 3 + Math.floor(Math.random() * 3);
+      this.shotT = 0;
+    },
+    score(ctx) {
+      if (!p.armed || !st.armed || !ctx.known) return 0;
+      const agitation = clamp((ctx.hostile ? 0.65 : 0) + (ctx.provoked ? 0.55 : 0), 0, 1);
+      if (agitation === 0) return 0;
+      let s = agitation * (0.65 + 0.35 * p.aggression);
+      const bravery = clamp(p.courage + ctx.hpFrac - 0.6, 0, 1);
+      s *= 0.25 + 0.75 * bravery;
+      if (!ctx.aware) s *= 0.75;
+      if (ctx.t < mem.coverUntil) s *= 0.2;
+      return s;
+    },
+    enter() {
+      this.aimTime = 0;
+      this.strafeT = 0;
+      this.newBurst();
+    },
+    update(dt, ctx) {
+      const target = ctx.target;
+      if (!target || !ctx.focus) return IDLE;
+      const [fx, , fz] = ctx.focus;
+      const d = Math.hypot(fx - st.pos[0], fz - st.pos[2]);
+      const canFire = ctx.aware && lineOfFire(target);
+      if (ctx.aware) self.aim([target.state.pos[0], target.state.pos[1] + 0.2, target.state.pos[2]]);
+      this.aimTime = canFire ? this.aimTime + dt : Math.max(0, this.aimTime - dt * 2);
+
+      // Fire a burst once lined up; afterwards take a breather behind cover.
+      this.shotT -= dt;
+      if (canFire && this.aimTime >= p.reaction + 0.25 && this.burstLeft > 0 && this.shotT <= 0) {
+        if (self.shoot(aimPointFor(target, this.aimTime))) {
+          this.burstLeft--;
+          this.shotT = 0.28 + Math.random() * 0.1;
+          if (this.burstLeft === 0) mem.coverUntil = ctx.t + 2.5 + Math.random() * 1.5;
+        }
+      }
+      if (this.burstLeft === 0 && ctx.t >= mem.coverUntil) this.newBurst();
+
+      // Positioning.
+      if (!canFire && d > 6) {
+        agent.goTo(fx, fz); // no shot from here: close in until there is one
+        return agent.update(dt, { run: d > 16, speed: 0.85 });
+      }
+      if (d < 6) {
+        const ax = st.pos[0] - fx;
+        const az = st.pos[2] - fz;
+        const len = Math.hypot(ax, az) || 1;
+        const gx = st.pos[0] + (ax / len) * 4;
+        const gz = st.pos[2] + (az / len) * 4;
+        if (nav.walkable(gx, gz)) agent.goTo(gx, gz);
+        return agent.update(dt, { speed: 0.8 });
+      }
+      if (d > 14) {
+        agent.goTo(fx, fz);
+        return agent.update(dt, { speed: 0.8 });
+      }
+      // In the sweet spot: strafe so the player has a moving target.
+      this.strafeT -= dt;
+      if (this.strafeT <= 0 || agent.arrived || agent.failed) {
+        this.strafeT = 1.5 + Math.random() * 1.5;
+        this.strafeSide = Math.random() < 0.5 ? -1 : 1;
+        const px = (st.pos[2] - fz) / (d || 1);
+        const pz = -(st.pos[0] - fx) / (d || 1);
+        const gx = st.pos[0] + px * this.strafeSide * 2.5;
+        const gz = st.pos[2] + pz * this.strafeSide * 2.5;
+        if (nav.walkable(gx, gz) && nav.lineClear(st.pos[0], st.pos[2], gx, gz, false)) agent.goTo(gx, gz);
+        else agent.stop();
+        agent.arrived = false;
+        agent.failed = false;
+      }
+      return agent.update(dt, { speed: 0.55 });
+    },
+    exit() {
+      agent.stop();
+    },
+  };
+
+  // Duck out of sight: after a burst, or when hurt.
+  const cover = {
+    name: "cover",
+    goal: null,
+    pickT: 0,
+    score(ctx) {
+      if (!p.armed || !st.armed || !ctx.known) return 0;
+      const agitated = ctx.hostile || ctx.provoked;
+      if (!agitated) return 0;
+      const hurt = ctx.t - mem.hurtAt < 3;
+      if (!hurt && ctx.t >= mem.coverUntil) return 0;
+      // Hurt and brave enough to keep fighting from behind a wall; otherwise fleeing wins.
+      return 0.95;
+    },
+    enter() {
+      this.goal = null;
+      this.pickT = 0;
+    },
+    update(dt, ctx) {
+      this.pickT -= dt;
+      if (ctx.focus && (this.pickT <= 0 || agent.failed)) {
+        this.pickT = 1.2;
+        const c = findCover(ctx.focus);
+        if (c && (!this.goal || Math.hypot(c[0] - this.goal[0], c[1] - this.goal[1]) > 1.5)) {
+          this.goal = c;
+          agent.goTo(c[0], c[1]);
+        }
+        agent.failed = false;
+      }
+      // Keep the gun up toward the threat while moving, so a peek is not a fresh start.
+      if (ctx.aware && ctx.target) self.aim([ctx.target.state.pos[0], ctx.target.state.pos[1] + 0.2, ctx.target.state.pos[2]]);
+      return agent.update(dt, { run: true, speed: 1 });
+    },
+    exit() {
+      agent.stop();
+    },
+  };
+
+  const behaviours = [wander, investigate, chase, flee, shoot, cover];
   let current = null;
   let dwell = 0;
   let decideT = Math.random() * THINK_EVERY;

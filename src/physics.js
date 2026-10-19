@@ -422,7 +422,7 @@ export async function createWorld() {
 
   // Closest thing along the ray: the floor, the scenery boxes, or a body part of any
   // character other than `exclude`. `d` is a unit vector.
-  world.raycast = (o, d, maxDist, exclude = null) => {
+  world.raycast = (o, d, maxDist, exclude = null, { sceneryOnly = false } = {}) => {
     let best = null;
     const consider = (t, extra) => {
       if (t !== null && t <= maxDist && (!best || t < best.dist)) {
@@ -431,6 +431,7 @@ export async function createWorld() {
     };
     if (d[1] < -1e-6) consider(-o[1] / d[1], { kind: "scenery" });
     for (const box of OBSTACLES) consider(rayVsBox(o, d, box.pos, [0, 0, 0, 1], box.half), { kind: "scenery" });
+    if (sceneryOnly) return best;
     consider(rayVsSphere(o, d, ball.position(), ball.radius), { kind: "ball" });
     for (const character of world.characters) {
       if (character === exclude) continue;
@@ -441,9 +442,9 @@ export async function createWorld() {
     return best;
   };
 
-  function spawnCharacter(origin, { yaw = 0, kind = "npc", name = kind } = {}) {
+  function spawnCharacter(origin, { yaw = 0, kind = "npc", name = kind, armed } = {}) {
     const ragdoll = spawnRagdoll(origin, { yaw, velocity: [0, 0, 0] });
-    const character = createCharacter(world, ragdoll, { yaw, kind, name });
+    const character = createCharacter(world, ragdoll, { yaw, kind, name, armed });
     world.characters.push(character);
     return character;
   }

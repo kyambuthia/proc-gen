@@ -41,6 +41,7 @@ export const BULLET_IMPULSE = 45; // N*s
 export const HOLD_REACH = 1.7; // how close the ball must be to pick it up
 export const KICK_IMPULSE = 13; // N*s on a 1 kg ball, i.e. about 13 m/s
 export const BALL_SHOT_IMPULSE = 10;
+export const NPC_DAMAGE_SCALE = 0.4; // NPC bullets hurt less than the player's
 export const KNOCKDOWN_SPEED = 1.5; // m/s of whole-body velocity change inside the impact window
 
 // Launch velocity that carries a ball from `from` to `to` on a low arc, under gravity g. The
@@ -91,7 +92,7 @@ export function legIK(d) {
   };
 }
 
-export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = "npc" } = {}) {
+export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = "npc", armed = kind === "player" } = {}) {
   const { Jolt, bodies } = world.ctx;
   const byName = ragdoll.byName;
   const ids = {};
@@ -229,6 +230,7 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
   const st = {
     kind,
     name,
+    armed,
     hpMax: 100,
     hp: 100,
     mode: "active", // active | down | getup | dead
@@ -925,9 +927,20 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
     return [p.GetX() + tip[0], p.GetY() + tip[1], p.GetZ() + tip[2]];
   }
 
+  // Raise the gun and face a point without firing, so an NPC can line up a shot.
+  function aim(point) {
+    if (!st.armed || st.mode !== "active") return false;
+    const dx = point[0] - st.pos[0];
+    const dz = point[2] - st.pos[2];
+    st.aimYaw = Math.atan2(dx, dz);
+    st.aimPitch = Math.asin(clamp((point[1] - (st.pos[1] + 0.25)) / (Math.hypot(dx, dz, point[1] - st.pos[1]) || 1), -1, 1));
+    st.aimT = Math.max(st.aimT, 0.35);
+    return true;
+  }
+
   // Fire at a world point. Returns the tracer and what it hit, or null if it could not fire.
   function shoot(aimPoint) {
-    if (st.mode !== "active" || st.gunCool > 0) return null;
+    if (!st.armed || st.mode !== "active" || st.gunCool > 0) return null;
     const from = muzzle();
     const d = [aimPoint[0] - from[0], aimPoint[1] - from[1], aimPoint[2] - from[2]];
     const len = Math.hypot(...d) || 1;
@@ -947,12 +960,14 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
         point: result.point,
         dir,
         impulse: BULLET_IMPULSE,
-        damage: head ? 50 : result.part.startsWith("thigh") || result.part.startsWith("shin") ? 15 : 25,
+        damage: (head ? 50 : result.part.startsWith("thigh") || result.part.startsWith("shin") ? 15 : 25) * (kind === "player" ? 1 : NPC_DAMAGE_SCALE),
         source: self,
       });
     }
     if (result?.kind === "ball") world.ball.kick(dir, BALL_SHOT_IMPULSE, result.point);
     impulse(ids.torso, [-dir[0] * 6, -dir[1] * 6, -dir[2] * 6]);
+    // Announced after the ray cast so the renderer can draw a tracer for anyone's shot.
+    world.emit({ type: "shot", by: self, from, to, hit: result });
     return { from, to, hit: result };
   }
 
@@ -1007,6 +1022,7 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
     drop,
     throwBall,
     shoot,
+    aim,
     setLimp,
     muzzle,
     // Latest torso position and ground-plane velocity, for cameras and AI.
