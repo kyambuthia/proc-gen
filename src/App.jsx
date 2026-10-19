@@ -4,6 +4,7 @@ import { CanvasTexture, SRGBColorSpace, Vector3 } from "three";
 import { createBrain } from "./ai.js";
 import { loadArena } from "./arena.js";
 import { nav } from "./nav.js";
+import { createWaveDirector } from "./waves.js";
 import { GRAVITY, throwVelocity } from "./character.js";
 import { poseAngles } from "./pose.js";
 import { createWorld, OBSTACLES, PLAYER, RAGDOLL_FOOT_OFFSET } from "./physics.js";
@@ -30,6 +31,23 @@ function newArena() {
   const url = new URL(window.location.href);
   url.searchParams.set("seed", String(Math.floor(Math.random() * 1e6)));
   window.location.href = url.toString();
+}
+
+// Best wave-mode score, kept in this browser only. Storage can be missing or blocked.
+const BEST_KEY = "proc-gen.best";
+function readBest() {
+  try {
+    return Number(window.localStorage.getItem(BEST_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}
+function saveBest(score) {
+  try {
+    window.localStorage.setItem(BEST_KEY, String(score));
+  } catch {
+    // Not saved; the best score just will not survive a reload.
+  }
 }
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -421,15 +439,18 @@ function Scene({ world, onHud }) {
       return c;
     };
     const hero = spawn([0, RAGDOLL_FOOT_OFFSET + 0.02, 4], { kind: "player", yaw: Math.PI });
-    const npcs = NPC_SPAWNS.map(({ at: [x, z], role }) => {
-      const c = spawn([x, RAGDOLL_FOOT_OFFSET + 0.02, z], { kind: "npc", yaw: Math.random() * 6, armed: role === "gunner" });
+    const spawnNpc = (role, [x, z], yaw = Math.random() * 6) => {
+      const c = spawn([x, RAGDOLL_FOOT_OFFSET + 0.02, z], { kind: "npc", yaw, armed: role === "gunner" });
       c.brain = createBrain(c, world, { origin: [x, z], role });
       return c;
-    });
+    };
+    const npcs = NPC_SPAWNS.map(({ at, role }) => spawnNpc(role, at));
     const game = {
       spawn,
+      spawnNpc,
       hero,
       npcs,
+      best: readBest(),
       player: world.createPlayer([0, 3, 4]), // the kinematic, animated version
       keys: new Set(),
       limp: null,
@@ -462,10 +483,29 @@ function Scene({ world, onHud }) {
       }
       return game.limp ? "Animated figure (limp)" : "Animated figure";
     };
+    // Wave mode: its enemies live in game.npcs like any other NPC.
+    game.waves = createWaveDirector({
+      world,
+      player: () => game.hero,
+      spawn(role, at) {
+        const c = spawnNpc(role, at);
+        game.npcs.push(c);
+        game.rosterChanged?.();
+        return c;
+      },
+      remove(c) {
+        const i = game.npcs.indexOf(c);
+        if (i < 0) return;
+        game.npcs.splice(i, 1);
+        world.removeCharacter(c);
+        game.rosterChanged?.();
+      },
+    });
     return game;
   });
 
   const refreshRoster = () => setRoster([game.hero, ...game.npcs].filter(Boolean));
+  game.rosterChanged = refreshRoster;
 
   // Every shot, the player's or an NPC's, leaves a tracer.
   useEffect(
@@ -552,7 +592,25 @@ function Scene({ world, onHud }) {
       refreshRoster();
     }
 
+    // Wave mode on: clear the sandbox NPCs and start. Off: stop and bring the sandbox NPCs back.
+    function toggleWaves() {
+      for (const c of game.npcs) world.removeCharacter(c);
+      game.npcs.length = 0;
+      if (game.waves.active) {
+        game.waves.stop();
+        for (const { at, role } of NPC_SPAWNS) game.npcs.push(game.spawnNpc(role, at));
+        game.event = "Wave mode off";
+      } else {
+        if (!game.hero) toggleMode();
+        game.hero.state.hp = game.hero.state.hpMax;
+        game.waves.start();
+        game.event = "Wave mode";
+      }
+      refreshRoster();
+    }
+
     function addNpc() {
+      if (game.waves.active) return; // the waves decide who joins
       const base = game.hero ? game.hero.state : { pos: [0, 0, 4], heading: Math.PI };
       // In front of the player, moved out of any wall.
       const [x, z] = nav.nearestWalkable(base.pos[0] + Math.sin(base.heading) * 3, base.pos[2] + Math.cos(base.heading) * 3) ?? [0, 4];
@@ -577,6 +635,7 @@ function Scene({ world, onHud }) {
       if (e.code === "KeyE") addNpc();
       if (e.code === "KeyH") game.hostile = !game.hostile;
       if (e.code === "KeyN") newArena();
+      if (e.code === "KeyV") toggleWaves();
       if (e.code === "Backquote") {
         game.debug = !game.debug;
         setDebug(game.debug);
@@ -670,8 +729,10 @@ function Scene({ world, onHud }) {
       game.steps++;
       if (game.hero) game.hero.update(STEP, game.hero.state.mode === "active" ? readInput() : IDLE);
       else if (!game.limp) game.player.update(STEP, readInput());
-      for (const npc of game.npcs) npc.update(STEP, npc.brain(STEP, game.hostile));
+      const hostile = game.hostile || game.waves.active;
+      for (const npc of game.npcs) npc.update(STEP, npc.brain(STEP, hostile));
       world.step(STEP);
+      game.waves.update(STEP);
       game.accumulator -= STEP;
     }
 
@@ -683,6 +744,12 @@ function Scene({ world, onHud }) {
         world.removeCharacter(game.hero);
         game.hero = game.spawn([0, RAGDOLL_FOOT_OFFSET + 0.02, 4], { kind: "player", yaw: Math.PI });
         game.event = "Respawned";
+        // A lost run ends here; its enemies leave with it and the sandbox comes back.
+        if (game.waves.over) {
+          game.event = `Run over: wave ${game.waves.wave}, score ${game.waves.score}`;
+          game.waves.stop();
+          for (const { at, role } of NPC_SPAWNS) game.npcs.push(game.spawnNpc(role, at));
+        }
         refreshRoster();
       }
     }
@@ -747,7 +814,17 @@ function Scene({ world, onHud }) {
         npcs: alive.length,
         down: alive.filter((n) => n.state.mode !== "active").length,
         dead: game.npcs.length - alive.length,
-        hostile: game.hostile,
+        hostile: game.hostile || game.waves.active,
+        waves: (() => {
+          const w = game.waves;
+          if (w.score > game.best) {
+            game.best = w.score;
+            saveBest(w.score);
+          }
+          return w.active
+            ? { wave: w.wave, left: w.enemiesLeft(), score: w.score, kills: w.kills, best: game.best, banner: w.banner?.text ?? null }
+            : { banner: w.banner?.text ?? null, best: game.best };
+        })(),
         holding: !!game.hero?.state.holding,
         event: game.event,
         debug: game.debug
@@ -834,7 +911,12 @@ export default function App() {
   // The arena must be in place before the world builds its static bodies.
   const [seed] = useState(() => loadArena(new URLSearchParams(window.location.search).get("seed")));
 
+  // Build the physics world once. A hot reload re-runs effects but keeps state, and a second world
+  // would leave the scene freeing bodies through the wrong one.
+  const worldStarted = useRef(false);
   useEffect(() => {
+    if (worldStarted.current) return;
+    worldStarted.current = true;
     createWorld().then(setWorld, (e) => setFault(e?.message ?? String(e)));
   }, []);
 
@@ -866,9 +948,10 @@ export default function App() {
         </div>
       )}
       <div className="crosshair" />
+      {hud?.waves.banner && <div className="banner">{hud.waves.banner}</div>}
       <div className="hint">
         WASD move &middot; Shift run &middot; Space jump &middot; click shoot &middot; F punch &middot; R go limp / get up
-        &middot; K kick &middot; G pick up / drop ball &middot; B reset ball &middot; E add NPC &middot; H hostile NPCs &middot; N new arena &middot; T animated / active &middot; ` debug view &middot; drag to look, wheel to zoom
+        &middot; K kick &middot; G pick up / drop ball &middot; B reset ball &middot; E add NPC &middot; H hostile NPCs &middot; V wave mode &middot; N new arena &middot; T animated / active &middot; ` debug view &middot; drag to look, wheel to zoom
         {hud && (
           <div className="status">
             Arena: <strong>{seed ?? "classic"}</strong> &middot; Mode: <strong>{hud.mode}</strong>
@@ -881,6 +964,12 @@ export default function App() {
             <strong>{hud.hostile ? "on" : "off"}</strong>
             {hud.holding && <> &middot; <strong>holding the ball: click to throw, G to drop</strong></>}
             {hud.event && <> &middot; {hud.event}</>}
+            {hud.waves.wave !== undefined && (
+              <div className="waves">
+                Wave <strong>{hud.waves.wave}</strong> &middot; enemies left <strong>{hud.waves.left}</strong> &middot; kills{" "}
+                <strong>{hud.waves.kills}</strong> &middot; score <strong>{hud.waves.score}</strong> &middot; best {hud.waves.best}
+              </div>
+            )}
           </div>
         )}
         {hud?.debug && (

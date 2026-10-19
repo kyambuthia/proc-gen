@@ -761,8 +761,10 @@ export function createCharacter(world, ragdoll, { yaw = 0, kind = "npc", name = 
     st.lastHit = part;
     st.hitCount++;
     st.impactSpeed += J / totalMass;
-    if (st.hp <= 0) die();
-    else if (st.impactSpeed > KNOCKDOWN_SPEED && st.mode === "active") knockDown(1.8 + Math.random());
+    if (st.hp <= 0) {
+      die();
+      world.emit({ type: "death", victim: self, by: source, part });
+    } else if (st.impactSpeed > KNOCKDOWN_SPEED && st.mode === "active") knockDown(1.8 + Math.random());
   }
 
   function punch(targets) {
