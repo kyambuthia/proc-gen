@@ -308,7 +308,44 @@ export function createNav(obstacles = OBSTACLES) {
     return len;
   };
 
-  return { findPath, lineClear, nearestWalkable, heightAt, walkable, cellOf, size: N };
+  // Flood fill over the same moves A* may take. Returns how many unblocked cells exist and how
+  // many of them can be reached from (x, z).
+  function reach(x, z) {
+    const seen = new Uint8Array(N * N);
+    const start = nearestWalkable(x, z);
+    let total = 0;
+    for (let i = 0; i < N * N; i++) if (!blocked[i]) total++;
+    if (!start) return { total, reached: 0 };
+    const s = idx(cellOf(start[0]), cellOf(start[1]));
+    const stack = [s];
+    seen[s] = 1;
+    let reached = 0;
+    while (stack.length) {
+      const cur = stack.pop();
+      reached++;
+      const cx = cur % N;
+      const cz = (cur / N) | 0;
+      for (const [dx, dz] of DIRS) {
+        if (dx && dz) continue;
+        const nx = cx + dx;
+        const nz = cz + dz;
+        if (!inGrid(nx, nz)) continue;
+        const ni = idx(nx, nz);
+        if (seen[ni] || !edge(cur, ni, false)) continue;
+        seen[ni] = 1;
+        stack.push(ni);
+      }
+    }
+    return { total, reached };
+  }
+
+  return { findPath, lineClear, nearestWalkable, heightAt, walkable, cellOf, reach, size: N };
 }
 
-export const nav = createNav();
+// The shared grid. Its methods are swapped in place when the arena changes, so modules that
+// imported `nav` keep working.
+export const nav = {};
+export function rebuildNav(obstacles = OBSTACLES) {
+  return Object.assign(nav, createNav(obstacles));
+}
+rebuildNav();

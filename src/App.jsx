@@ -2,6 +2,8 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CanvasTexture, SRGBColorSpace, Vector3 } from "three";
 import { createBrain } from "./ai.js";
+import { loadArena } from "./arena.js";
+import { nav } from "./nav.js";
 import { GRAVITY, throwVelocity } from "./character.js";
 import { poseAngles } from "./pose.js";
 import { createWorld, OBSTACLES, PLAYER, RAGDOLL_FOOT_OFFSET } from "./physics.js";
@@ -16,6 +18,19 @@ const NPC_SPAWNS = [
 ];
 const ROLE_POOL = ["brawler", "gunner", "civilian"];
 const IDLE = { x: 0, z: 0, run: false, jump: false };
+
+// Scenery colour by height: walkable steps light, jumpable blocks mid, walls dark.
+const boxColor = (o) => {
+  const top = o.pos[1] + o.half[1];
+  return top <= 0.55 ? "#6f7786" : top <= 1.25 ? "#59606e" : "#434956";
+};
+
+// A new random arena: reload with a fresh seed in the URL, so it can be shared or revisited.
+function newArena() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("seed", String(Math.floor(Math.random() * 1e6)));
+  window.location.href = url.toString();
+}
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const damp = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
@@ -539,8 +554,8 @@ function Scene({ world, onHud }) {
 
     function addNpc() {
       const base = game.hero ? game.hero.state : { pos: [0, 0, 4], heading: Math.PI };
-      const x = base.pos[0] + Math.sin(base.heading) * 3;
-      const z = base.pos[2] + Math.cos(base.heading) * 3;
+      // In front of the player, moved out of any wall.
+      const [x, z] = nav.nearestWalkable(base.pos[0] + Math.sin(base.heading) * 3, base.pos[2] + Math.cos(base.heading) * 3) ?? [0, 4];
       const role = ROLE_POOL[Math.floor(Math.random() * ROLE_POOL.length)];
       const c = game.spawn([x, RAGDOLL_FOOT_OFFSET + 0.02, z], { kind: "npc", yaw: base.heading + Math.PI, armed: role === "gunner" });
       c.brain = createBrain(c, world, { origin: [x, z], role });
@@ -561,6 +576,7 @@ function Scene({ world, onHud }) {
       if (e.code === "KeyT") toggleMode();
       if (e.code === "KeyE") addNpc();
       if (e.code === "KeyH") game.hostile = !game.hostile;
+      if (e.code === "KeyN") newArena();
       if (e.code === "Backquote") {
         game.debug = !game.debug;
         setDebug(game.debug);
@@ -777,10 +793,10 @@ function Scene({ world, onHud }) {
         intensity={1.8}
         castShadow
         shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-14}
-        shadow-camera-right={14}
-        shadow-camera-top={14}
-        shadow-camera-bottom={-14}
+        shadow-camera-left={-26}
+        shadow-camera-right={26}
+        shadow-camera-top={26}
+        shadow-camera-bottom={-26}
       />
       <mesh rotation-x={-Math.PI / 2} receiveShadow>
         <planeGeometry args={[100, 100]} />
@@ -790,7 +806,7 @@ function Scene({ world, onHud }) {
       {OBSTACLES.map((o, i) => (
         <mesh key={i} position={o.pos} castShadow receiveShadow>
           <boxGeometry args={o.half.map((h) => h * 2)} />
-          <meshStandardMaterial color="#59606e" />
+          <meshStandardMaterial color={boxColor(o)} />
         </mesh>
       ))}
       <Rig rig={game.rig} color="#e8873a" />
@@ -815,6 +831,8 @@ export default function App() {
   const [world, setWorld] = useState(null);
   const [hud, setHud] = useState(null);
   const [fault, setFault] = useState(null);
+  // The arena must be in place before the world builds its static bodies.
+  const [seed] = useState(() => loadArena(new URLSearchParams(window.location.search).get("seed")));
 
   useEffect(() => {
     createWorld().then(setWorld, (e) => setFault(e?.message ?? String(e)));
@@ -850,10 +868,10 @@ export default function App() {
       <div className="crosshair" />
       <div className="hint">
         WASD move &middot; Shift run &middot; Space jump &middot; click shoot &middot; F punch &middot; R go limp / get up
-        &middot; K kick &middot; G pick up / drop ball &middot; B reset ball &middot; E add NPC &middot; H hostile NPCs &middot; T animated / active &middot; ` debug view &middot; drag to look, wheel to zoom
+        &middot; K kick &middot; G pick up / drop ball &middot; B reset ball &middot; E add NPC &middot; H hostile NPCs &middot; N new arena &middot; T animated / active &middot; ` debug view &middot; drag to look, wheel to zoom
         {hud && (
           <div className="status">
-            Mode: <strong>{hud.mode}</strong>
+            Arena: <strong>{seed ?? "classic"}</strong> &middot; Mode: <strong>{hud.mode}</strong>
             {hud.hp !== null && (
               <>
                 {" "}&middot; You: <strong>{hud.hp} hp</strong>

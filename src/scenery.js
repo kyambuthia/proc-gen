@@ -1,5 +1,6 @@
-// Static scenery: a flat floor plus a few boxes to run into and jump onto.
-export const OBSTACLES = [
+// Static scenery: a flat floor plus a few boxes to run into and jump onto. OBSTACLES is the live
+// list everything reads; `setObstacles` swaps its contents (for a generated arena) in place.
+export const CLASSIC = [
   { pos: [4, 0.25, -2], half: [1.5, 0.25, 1.5] },
   { pos: [7, 0.5, -2], half: [1.5, 0.5, 1.5] },
   { pos: [-5, 0.4, -4], half: [2, 0.4, 1] },
@@ -9,6 +10,13 @@ export const OBSTACLES = [
   { pos: [10, 1.5, -8], half: [0.4, 1.5, 3] },
   { pos: [-12, 1.5, 6], half: [3, 1.5, 0.4] },
 ];
+
+export const OBSTACLES = CLASSIC.map((o) => ({ pos: [...o.pos], half: [...o.half] }));
+
+export function setObstacles(list) {
+  OBSTACLES.length = 0;
+  for (const o of list) OBSTACLES.push({ pos: [...o.pos], half: [...o.half] });
+}
 
 // Height of the scenery under (x, z), ignoring anything above `below`.
 export function groundHeight(x, z, below, margin = 0.2) {
