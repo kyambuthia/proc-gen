@@ -464,15 +464,25 @@ function deriveFeatureSeed(seed, id) {
   return hashSeed(`${hashSeed(seed)}:${id}`);
 }
 
-function drawAreaMesh(mesh, feature, seed) {
+function drawAreaMesh(mesh, feature, seed, terrain = null) {
   const polygon = simplifyToBudget(feature.polygon, feature.kind === "building" ? 0.08 : 0.3, MAX_POLYGON_POINTS, true);
   const color = feature.kind === "building"
     ? [[0.75, 0.39, 0.25], [0.76, 0.66, 0.48], [0.48, 0.54, 0.57], [0.78, 0.55, 0.3]][deriveFeatureSeed(seed, feature.id) % 4]
     : areaColor(feature, seed);
   if (feature.kind !== "building") {
+    let waterLevel = null;
+    if (feature.kind === "water") {
+      waterLevel = 0.12;
+      if (terrain) {
+        const centerX = polygon.reduce((sum, [x]) => sum + x, 0) / polygon.length;
+        const centerZ = polygon.reduce((sum, [, z]) => sum + z, 0) / polygon.length;
+        waterLevel += sampleTerrainHeight(terrain.seed, centerX, centerZ, terrain.params);
+      }
+    }
     for (const triangle of triangulateOsmPolygon(polygon)) {
       const surface = feature.kind === "water" ? SURFACE_WATER : SURFACE_DEFAULT;
-      mesh.addFlatTriangle(triangle.map(([x, z]) => [x, feature.kind === "water" ? 0.07 : 0.012, z]), color, [0, -1, 0], 0, surface);
+      const y = feature.kind === "water" ? waterLevel : 0.012;
+      mesh.addFlatTriangle(triangle.map(([x, z]) => [x, y, z]), color, [0, -1, 0], 0, surface);
     }
     return;
   }
@@ -540,9 +550,9 @@ function compileMeshes(features, seed, terrain = null) {
   meshes.roads = geometryChunks(roads, drawLineMesh, budget);
   meshes.waterways = geometryChunks(waterways, drawLineMesh, budget);
   meshes.greenery = geometryChunks(greenery, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget);
-  meshes.water = geometryChunks(water, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget);
+  meshes.water = geometryChunks(water, (mesh, feature) => drawAreaMesh(mesh, feature, seed, terrain), budget);
   meshes.buildings = geometryChunks(buildings, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget);
-  for (const key of ["roads", "waterways", "greenery", "water", "buildings"]) conformToTerrain(meshes[key], terrain);
+  for (const key of ["roads", "waterways", "greenery", "buildings"]) conformToTerrain(meshes[key], terrain);
   if (!greenery.length || budget.vertices >= MAX_TOTAL_SCENE_VERTICES) return meshes;
 
   const occupiedByBuildings = buildings.map((feature) => {

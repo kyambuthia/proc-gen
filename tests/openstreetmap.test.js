@@ -94,11 +94,16 @@ test("OSM ways become seeded, bounded meshes with portable attribution", () => {
     for (let i = 0; i < mesh.vertices.length; i += mesh.stride) {
       assert.equal(mesh.vertices[i + 10], SURFACE_WATER, "mapped lakes must use the animated water shader path");
     }
+    const elevations = [];
+    for (let i = 1; i < mesh.vertices.length; i += mesh.stride) elevations.push(mesh.vertices[i]);
+    assert.ok(Math.max(...elevations) - Math.min(...elevations) < 1e-5, "mapped lake polygons should keep one level surface");
   }
   for (const mesh of scene.meshes.waterways) {
     for (let i = 0; i < mesh.vertices.length; i += mesh.stride) {
       assert.equal(Math.floor(mesh.vertices[i + 10] + 0.0001), SURFACE_RIVER, "mapped waterways must use the flowing water shader path");
       assert.deepEqual(Array.from(mesh.vertices.slice(i + 3, i + 6)), [0, 1, 0], "river vertices preserve their geometric surface normal");
+      const expectedGround = sampleTerrainHeight(scene.spec.terrain.seed, mesh.vertices[i], mesh.vertices[i + 2], scene.spec.terrain.params);
+      assert.ok(Math.abs(mesh.vertices[i + 1] - expectedGround - 0.07) < 1e-5, "river surfaces follow the terrain while flowing");
     }
   }
   const terrainMesh = scene.meshes.terrain[0];
