@@ -8,9 +8,9 @@ The first vertical slice is available at `/graphics-lab.html`: deterministic tre
 
 ## Asset contract
 
-An asset is described by a serializable specification containing its type, schema version, seed, parameters, motion profile, and simplified collider. Geometry is derived from that specification and may be rebuilt or exported. Visual detail and collision detail stay separate.
+An asset is described by a serializable specification containing its type, schema version, seed, parameters, motion profile, and simplified collider. `src/procedural/assets.js` exposes a registry that creates, serializes, imports, and rebuilds specs. The first registered families are broadleaf trees, tree groves, faceted rocks, and decorative rock fields. Geometry is derived from the spec, so exported JSON stays small and portable. Visual detail and collision detail stay separate.
 
-Generators use stable seed derivation rather than global `Math.random()`. Repeated instances should be batched by material and geometry where practical. Low-end profiles should reduce instance count, mesh subdivisions, and render resolution before changing the art direction.
+Generators use stable seed derivation rather than global `Math.random()`. Repeated instances are merged or batched by geometry where practical. Each uploaded mesh currently uses 16-bit indices and rejects more than 65,535 vertices; larger scenes must be split into batches. Low-end profiles should reduce instance count, mesh subdivisions, and render resolution before changing the art direction.
 
 ## Shader contract
 

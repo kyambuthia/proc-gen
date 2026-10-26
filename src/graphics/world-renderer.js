@@ -4,7 +4,7 @@ import { compileProgram, uploadMesh } from "./webgl2.js";
 import { transform4 } from "./transform.js";
 import { createRng } from "../procedural/seed.js";
 import { MeshBuilder } from "../procedural/mesh-builder.js";
-import { createGrove } from "../procedural/tree.js";
+import { createAsset } from "../procedural/assets.js";
 
 const WHITE = [1, 1, 1];
 const ROLE_TINT = {
@@ -72,7 +72,12 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
   const box = getMesh("box", unitBox);
   const sphere = getMesh("sphere", unitSphere);
   const floor = getMesh("ground", () => makeGround(seed));
-  const grove = getMesh("grove", () => createGrove(seed, 8).geometry);
+  const grove = getMesh("grove", () => createAsset("grove", seed, { count: 8 }).geometry);
+  const rockField = getMesh("rock-field", () => createAsset("rock-field", seed, {
+    count: 40,
+    innerRadius: 23,
+    outerRadius: 32,
+  }).geometry);
   const supportsInstancing = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) >= 9;
   if (!supportsInstancing) throw new Error("WebGL 2 reports fewer vertex attributes than this renderer needs.");
 
@@ -157,6 +162,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
     add(floor, transform4([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]), WHITE);
     add(grove, transform4([25, 0, -19], [0, 0, 0, 1], [1, 1, 1]), WHITE);
     add(grove, transform4([-25, 0, 19], [0, 1, 0, 0], [1, 1, 1]), WHITE);
+    add(rockField, transform4([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]), WHITE);
 
     const hero = game.hero;
     const focus = hero ? hero.state.pos : game.player.read();

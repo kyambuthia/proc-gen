@@ -1,5 +1,6 @@
 import { createRng, deriveSeed, hashSeed } from "./seed.js";
 import { MeshBuilder } from "./mesh-builder.js";
+import { registerAssetGenerator } from "./asset-registry.js";
 
 const LEAF_PALETTE = [
   [0.18, 0.52, 0.24],
@@ -50,11 +51,12 @@ export function createTree(seed, { variant = "broadleaf" } = {}) {
       type: "tree",
       version: 1,
       seed: seedValue,
-      params: { variant, height, trunkRadius, crownY },
+      params: { variant },
+      measurements: { height, trunkRadius, crownY },
       motion: { kind: "wind", phase: createRng(deriveSeed(seedValue, "wind"))() * Math.PI * 2 },
       collider: { kind: "cylinder", radius: trunkRadius * 0.8, height: crownY },
     },
-    bounds: { min: [-1.6, 0, -1.6], max: [1.6, height + 1.1, 1.6] },
+    bounds: { min: [-1.8, 0, -1.8], max: [1.8, height + 1.1, 1.8] },
     geometry,
   };
 }
@@ -74,7 +76,21 @@ export function createGrove(seed, count = 7) {
     trees.push({ ...tree.spec, position, scale: size });
   }
   return {
-    spec: { type: "grove", version: 1, seed: hashSeed(seed), children: trees },
+    spec: {
+      type: "grove",
+      version: 1,
+      seed: hashSeed(seed),
+      params: { count },
+      motion: { kind: "child-composition" },
+      collider: {
+        kind: "compound",
+        children: trees.map(({ collider, position, scale }) => ({ shape: collider, position, scale })),
+      },
+      children: trees,
+    },
     geometry: merged.build(),
   };
 }
+
+registerAssetGenerator("tree", createTree);
+registerAssetGenerator("grove", (seed, { count = 7 } = {}) => createGrove(seed, count));

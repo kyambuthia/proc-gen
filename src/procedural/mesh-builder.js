@@ -24,6 +24,31 @@ export class MeshBuilder {
     this.indices.push(a, b, c);
   }
 
+  // Add an isolated, flat-shaded triangle and orient it away from `origin`.
+  // Separate vertices let adjacent facets keep their own normals and pigments.
+  addFlatTriangle(points, color, origin = [0, 0, 0], wind = 0) {
+    let [a, b, c] = points;
+    const outward = [
+      (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]),
+      (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]),
+      (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]),
+    ];
+    const center = [
+      (a[0] + b[0] + c[0]) / 3 - origin[0],
+      (a[1] + b[1] + c[1]) / 3 - origin[1],
+      (a[2] + b[2] + c[2]) / 3 - origin[2],
+    ];
+    if (dot(outward, center) < 0) [b, c] = [c, b];
+    const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const normal = normalize(cross(ab, ac));
+    const first = this.vertices.length / STRIDE;
+    this.vertex(a, normal, color, wind);
+    this.vertex(b, normal, color, wind);
+    this.vertex(c, normal, color, wind);
+    this.triangle(first, first + 1, first + 2);
+  }
+
   addQuad(points, color, normal, wind = 0) {
     const first = this.vertices.length / STRIDE;
     for (const point of points) this.vertex(point, normal, color, wind);
@@ -169,6 +194,10 @@ export class MeshBuilder {
   }
 
   build() {
+    const vertexCount = this.vertices.length / STRIDE;
+    if (vertexCount > 65535) {
+      throw new RangeError(`Mesh has ${vertexCount} vertices; split it before the 16-bit index limit`);
+    }
     return {
       vertices: new Float32Array(this.vertices),
       indices: new Uint16Array(this.indices),

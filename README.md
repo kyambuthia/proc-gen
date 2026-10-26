@@ -22,6 +22,10 @@ ragdoll parts and scenery as instanced meshes; the lab builds a deterministic gr
 single merged draw. Neither path uses a scene graph or texture lookups. The target is desktop and
 mobile hardware with OpenGL ES 3.0 class support.
 
+Procedural assets use a seeded registry: `createAsset(type, seed, params)` builds geometry and a
+serializable spec; `serializeAsset` and `rebuildAsset` save and restore that recipe without storing
+GPU buffers. Current types are `tree`, `grove`, `rock`, and `rock-field`.
+
 ## Controls
 
 | Key | Action |
@@ -70,6 +74,7 @@ civilians run away.
 | `src/graphics/world-renderer.js` | Raw WebGL 2 batches for the playable scene |
 | `src/graphics/webgl2.js` | Shader compilation, GPU buffers, and instanced mesh upload |
 | `src/procedural/mesh-builder.js` | CPU mesh construction for boxes, ellipsoids, capsules, and merged assets |
+| `src/procedural/assets.js` | Public registry and JSON import/export for generated asset recipes |
 
 Each NPC brain returns the same `{ x, z, run, jump }` input the player produces, so a body does not
 know who is steering it. The game logic has no dependency on the renderer: the tests in `tests/`
