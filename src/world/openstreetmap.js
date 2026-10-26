@@ -1,6 +1,7 @@
 import { MeshBuilder, SURFACE_DEFAULT, SURFACE_WATER } from "../procedural/mesh-builder.js";
 import { createRng, hashSeed } from "../procedural/seed.js";
 import { createAsset } from "../procedural/assets.js";
+import { TREE_VARIANTS } from "../procedural/tree.js";
 
 const METERS_PER_LATITUDE_DEGREE = 111132;
 const MAX_SCENE_VERTICES = 60000;
@@ -9,6 +10,7 @@ const MAX_FEATURES = 2500;
 const MAX_BUILDING_COLLIDERS = 256;
 const MAX_PLAYABLE_EXTENT_METERS = 54;
 const MAX_PROCEDURAL_TREES = 32;
+const MAX_PROCEDURAL_GROUNDCOVER_CLUMPS = 1600;
 const MAX_PROCEDURAL_RATS = 12;
 const MESH_VERTEX_STRIDE = 11;
 const MAX_SOURCE_ELEMENTS = 30000;
@@ -510,6 +512,7 @@ function compileMeshes(features, seed) {
     water: geometryChunks(water, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget),
     buildings: geometryChunks(buildings, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget),
     trees: [],
+    groundcover: [],
     rats: [],
   };
   if (!greenery.length || budget.vertices >= MAX_TOTAL_SCENE_VERTICES) return meshes;
@@ -528,6 +531,16 @@ function compileMeshes(features, seed) {
     feature.tags.landuse === "forest" || feature.tags.landuse === "wood" || feature.tags.natural === "wood" ||
     feature.tags.leisure === "park" || feature.tags.leisure === "garden" || feature.tags.landuse === "grass" || feature.tags.landuse === "meadow",
   );
+  const roadsForVegetation = [...roads, ...waterways].flatMap((feature) => feature.paths.map((path) => {
+    const points = simplifyToBudget(path.points, 0.6, 48);
+    const xs = points.map(([x]) => x);
+    const zs = points.map(([, z]) => z);
+    return {
+      points,
+      width: path.width,
+      bounds: { minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) },
+    };
+  }));
   const mergedTrees = new MeshBuilder();
   const treeLocations = [];
   let treeCount = 0;
@@ -539,24 +552,38 @@ function compileMeshes(features, seed) {
     const maxX = Math.max(...xs);
     const minZ = Math.min(...zs);
     const maxZ = Math.max(...zs);
-    const spacing = feature.tags.landuse === "forest" || feature.tags.landuse === "wood" || feature.tags.natural === "wood" ? 5.5 : 9;
+    const nearbyRoads = roadsForVegetation.filter((path) => {
+      const padding = path.width * 0.5 + 1.5;
+      return path.bounds.maxX + padding >= minX && path.bounds.minX - padding <= maxX &&
+        path.bounds.maxZ + padding >= minZ && path.bounds.minZ - padding <= maxZ;
+    });
+    const forest = feature.tags.landuse === "forest" || feature.tags.landuse === "wood" || feature.tags.natural === "wood";
+    const spacing = forest ? 5.4 : 8.4;
+    const area = Math.abs(signedArea(feature.polygon));
+    const target = Math.min(MAX_PROCEDURAL_TREES - treeCount, Math.max(area > spacing * spacing * 0.55 ? 1 : 0, Math.floor(area / (spacing * spacing))));
+    if (target <= 0) continue;
     const random = createRng(deriveFeatureSeed(seed, `tree-layout:${feature.id}`));
-    for (let z = minZ + spacing * 0.5; z < maxZ && treeCount < MAX_PROCEDURAL_TREES; z += spacing) {
-      for (let x = minX + spacing * 0.5; x < maxX && treeCount < MAX_PROCEDURAL_TREES; x += spacing) {
-        const point = [x + (random() - 0.5) * spacing * 0.55, z + (random() - 0.5) * spacing * 0.55];
-        if (!pointInPolygon(point, feature.polygon)) continue;
-        if (occupiedByBuildings.some((box) => point[0] >= box.minX && point[0] <= box.maxX && point[1] >= box.minZ && point[1] <= box.maxZ)) continue;
-        const tree = createAsset("tree", deriveFeatureSeed(seed, `tree:${feature.id}:${treeCount}`), { variant: "broadleaf" });
-        const vertices = tree.geometry.vertices.length / tree.geometry.stride;
-        if (budget.vertices + mergedTrees.vertices.length / MESH_VERTEX_STRIDE + vertices > MAX_TOTAL_SCENE_VERTICES) {
-          treeBudgetFull = true;
-          break;
-        }
-        mergedTrees.append(tree.geometry, [point[0], 0, point[1]], 0.68 + random() * 0.34);
-        treeLocations.push(point);
-        treeCount++;
+    const dominantSpecies = TREE_VARIANTS[Math.floor(random() * TREE_VARIANTS.length)];
+    let placedInFeature = 0;
+    for (let attempt = 0; attempt < target * 100 && placedInFeature < target && treeCount < MAX_PROCEDURAL_TREES; attempt++) {
+      const point = [minX + random() * (maxX - minX), minZ + random() * (maxZ - minZ)];
+      if (!pointInPolygon(point, feature.polygon)) continue;
+      if (occupiedByBuildings.some((box) => point[0] >= box.minX && point[0] <= box.maxX && point[1] >= box.minZ && point[1] <= box.maxZ)) continue;
+      if (pointNearPaths(point, nearbyRoads, 1.3)) continue;
+      if (treeLocations.some((other) => pointDistanceSquared(point, other) < (spacing * 0.68) ** 2)) continue;
+      const variant = random() < 0.68 ? dominantSpecies : TREE_VARIANTS[Math.floor(random() * TREE_VARIANTS.length)];
+      const tree = createAsset("tree", deriveFeatureSeed(seed, `tree:${feature.id}:${treeCount}`), { variant });
+      const vertices = tree.geometry.vertices.length / tree.geometry.stride;
+      if (budget.vertices + mergedTrees.vertices.length / MESH_VERTEX_STRIDE + vertices > MAX_TOTAL_SCENE_VERTICES) {
+        treeBudgetFull = true;
+        break;
       }
-      if (treeBudgetFull || budget.vertices + mergedTrees.vertices.length / MESH_VERTEX_STRIDE >= MAX_TOTAL_SCENE_VERTICES) break;
+      const angle = random() * Math.PI * 2;
+      const scale = 0.68 + random() * 0.34;
+      appendRotated(mergedTrees, tree.geometry, [point[0], 0, point[1]], angle, scale);
+      treeLocations.push(point);
+      treeCount++;
+      placedInFeature++;
     }
     if (treeBudgetFull || treeCount >= MAX_PROCEDURAL_TREES || budget.vertices + mergedTrees.vertices.length / MESH_VERTEX_STRIDE >= MAX_TOTAL_SCENE_VERTICES) break;
   }
@@ -565,6 +592,45 @@ function compileMeshes(features, seed) {
     budget.vertices += geometry.vertices.length / geometry.stride;
     meshes.trees.push(geometry);
   }
+
+  let remainingClumps = MAX_PROCEDURAL_GROUNDCOVER_CLUMPS;
+  const greenAreasForCover = wooded.filter((feature) => Math.abs(signedArea(feature.polygon)) >= 8);
+  meshes.groundcover = geometryChunks(greenAreasForCover, (mesh, feature) => {
+    if (remainingClumps <= 0 || budget.vertices >= MAX_TOTAL_SCENE_VERTICES) return;
+    const xs = feature.polygon.map(([x]) => x);
+    const zs = feature.polygon.map(([, z]) => z);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    const width = Math.max(0.25, maxX - minX);
+    const depth = Math.max(0.25, maxZ - minZ);
+    const area = Math.abs(signedArea(feature.polygon));
+    const forest = feature.tags.landuse === "forest" || feature.tags.landuse === "wood" || feature.tags.natural === "wood";
+    const requested = Math.min(360, Math.max(8, Math.floor(area * (forest ? 0.15 : 0.23))));
+    const budgeted = Math.max(0, Math.floor((MAX_TOTAL_SCENE_VERTICES - budget.vertices) / 42));
+    const count = Math.min(requested, remainingClumps, budgeted);
+    if (!count) return;
+    const bounds = { minX: minX - 2, maxX: maxX + 2, minZ: minZ - 2, maxZ: maxZ + 2 };
+    const nearbyPaths = roadsForVegetation.filter((path) => {
+      const padding = path.width * 0.5 + 1;
+      return path.bounds.maxX + padding >= bounds.minX && path.bounds.minX - padding <= bounds.maxX &&
+        path.bounds.maxZ + padding >= bounds.minZ && path.bounds.minZ - padding <= bounds.maxZ;
+    }).slice(0, 160);
+    const cover = createAsset("groundcover", deriveFeatureSeed(seed, `cover:${feature.id}`), {
+      width,
+      depth,
+      count,
+      biome: forest ? "forest" : "meadow",
+      origin: [(minX + maxX) * 0.5, (minZ + maxZ) * 0.5],
+      areas: [feature.polygon],
+      treePositions: treeLocations.map(([x, z]) => [x, 0, z, 0.8]),
+      exclusions: occupiedByBuildings,
+      avoidPaths: nearbyPaths,
+    });
+    mesh.append(cover.geometry);
+    remainingClumps -= cover.spec.measurements.clumps;
+  }, budget);
 
   const mergedRats = new MeshBuilder();
   const ratLocations = [];
@@ -612,7 +678,7 @@ function compileMeshes(features, seed) {
   return meshes;
 }
 
-function appendRotated(builder, geometry, offset, angle) {
+function appendRotated(builder, geometry, offset, angle, scale = 1) {
   const vertices = new Float32Array(geometry.vertices);
   const cosine = Math.cos(angle);
   const sine = Math.sin(angle);
@@ -621,12 +687,13 @@ function appendRotated(builder, geometry, offset, angle) {
     const z = vertices[i + 2];
     const nx = vertices[i + 3];
     const nz = vertices[i + 5];
-    vertices[i] = x * cosine + z * sine;
-    vertices[i + 2] = -x * sine + z * cosine;
+    vertices[i] = (x * cosine + z * sine) * scale + offset[0];
+    vertices[i + 1] = vertices[i + 1] * scale + offset[1];
+    vertices[i + 2] = (-x * sine + z * cosine) * scale + offset[2];
     vertices[i + 3] = nx * cosine + nz * sine;
     vertices[i + 5] = -nx * sine + nz * cosine;
   }
-  builder.append({ vertices, indices: geometry.indices, stride: geometry.stride }, offset);
+  builder.append({ vertices, indices: geometry.indices, stride: geometry.stride });
 }
 
 function pointInPolygon(point, polygon) {
@@ -639,6 +706,27 @@ function pointInPolygon(point, polygon) {
     if (crosses) inside = !inside;
   }
   return inside;
+}
+
+function pointNearPaths(point, paths, padding = 1) {
+  for (const path of paths) {
+    const clearance = path.width * 0.5 + padding;
+    if (point[0] < path.bounds.minX - clearance || point[0] > path.bounds.maxX + clearance ||
+        point[1] < path.bounds.minZ - clearance || point[1] > path.bounds.maxZ + clearance) continue;
+    const clearanceSquared = clearance * clearance;
+    for (let i = 1; i < path.points.length; i++) {
+      const start = path.points[i - 1];
+      const end = path.points[i];
+      const dx = end[0] - start[0];
+      const dz = end[1] - start[1];
+      const lengthSquared = dx * dx + dz * dz || 1;
+      const t = Math.max(0, Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dz) / lengthSquared));
+      const x = start[0] + t * dx;
+      const z = start[1] + t * dz;
+      if (pointDistanceSquared(point, [x, z]) < clearanceSquared) return true;
+    }
+  }
+  return false;
 }
 
 function validateSceneSpec(spec) {

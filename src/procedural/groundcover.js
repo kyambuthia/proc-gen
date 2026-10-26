@@ -48,6 +48,26 @@ function gaussian(rng) {
   return Math.sqrt(-2 * Math.log(Math.max(0.00001, rng()))) * Math.cos(rng() * Math.PI * 2);
 }
 
+function pointInPolygon([x, z], polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i];
+    const b = polygon[j];
+    if ((a[1] > z) !== (b[1] > z) && x < ((b[0] - a[0]) * (z - a[1])) / (b[1] - a[1]) + a[0]) inside = !inside;
+  }
+  return inside;
+}
+
+function segmentDistanceSquared(point, start, end) {
+  const dx = end[0] - start[0];
+  const dz = end[1] - start[1];
+  const lengthSquared = dx * dx + dz * dz || 1;
+  const t = Math.max(0, Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dz) / lengthSquared));
+  const x = start[0] + t * dx;
+  const z = start[1] + t * dz;
+  return (point[0] - x) ** 2 + (point[1] - z) ** 2;
+}
+
 export function createGroundcover(seed, {
   width = 32,
   depth = 32,
@@ -56,19 +76,58 @@ export function createGroundcover(seed, {
   terrainSeed = null,
   terrainParams = {},
   treePositions = [],
+  origin = [0, 0],
+  areas = null,
+  exclusions = [],
+  avoidPaths = [],
 } = {}) {
   if (!PALETTES[biome]) throw new RangeError(`Unknown groundcover biome: ${biome}`);
   if (!Number.isFinite(width) || !Number.isFinite(depth) || width <= 0 || depth <= 0) throw new RangeError("Groundcover width and depth must be positive");
   if (!Number.isInteger(count) || count < 0 || count > 1400) throw new RangeError("Groundcover count must be an integer from 0 to 1400");
-  if (!Array.isArray(treePositions)) throw new TypeError("Groundcover tree positions must be an array");
+  if (!Array.isArray(treePositions) || treePositions.length > 512) throw new TypeError("Groundcover tree positions must be an array of at most 512 entries");
+  if (!Array.isArray(origin) || origin.length !== 2 || !origin.every(Number.isFinite)) throw new TypeError("Groundcover origin must contain two finite coordinates");
+  if (areas !== null && (!Array.isArray(areas) || areas.length > 64 || areas.some((polygon) => !Array.isArray(polygon) || polygon.length < 3 || polygon.length > 8192 || polygon.some((point) => !Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite))))) {
+    throw new TypeError("Groundcover areas must be polygons with finite x/z coordinates");
+  }
+  if (!Array.isArray(exclusions) || exclusions.length > 512 || exclusions.some((box) => !box || ![box.minX, box.maxX, box.minZ, box.maxZ].every(Number.isFinite))) throw new TypeError("Groundcover exclusions must be at most 512 finite x/z boxes");
+  if (!Array.isArray(avoidPaths) || avoidPaths.length > 256 || avoidPaths.some((path) => !path || !Array.isArray(path.points) || path.points.length < 2 || path.points.length > 128 || !path.points.every((point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite)) || !Number.isFinite(path.width) || path.width <= 0)) throw new TypeError("Groundcover avoided paths need bounded finite points and a positive width");
 
   const seedValue = hashSeed(seed);
   const rng = createRng(deriveSeed(seedValue, "groundcover-layout"));
   const patchCount = count === 0 ? 0 : Math.max(3, Math.min(10, Math.round(Math.sqrt(count) / 3)));
-  const patches = Array.from({ length: patchCount }, () => ({
-    x: (rng() - 0.5) * width * 0.78,
-    z: (rng() - 0.5) * depth * 0.78,
-  }));
+  const inArea = (x, z) => areas === null || areas.some((polygon) => pointInPolygon([x, z], polygon));
+  const preparedPaths = avoidPaths.map((path) => {
+    const xs = path.points.map(([x]) => x);
+    const zs = path.points.map(([, z]) => z);
+    return { ...path, minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
+  });
+  const clearOfObjects = (x, z) => {
+    const plantRadius = 0.48;
+    if (exclusions.some((box) => x >= box.minX - plantRadius && x <= box.maxX + plantRadius && z >= box.minZ - plantRadius && z <= box.maxZ + plantRadius)) return false;
+    if (preparedPaths.some((path) => {
+      const limit = path.width * 0.5 + plantRadius + 0.2;
+      if (x < path.minX - limit || x > path.maxX + limit || z < path.minZ - limit || z > path.maxZ + limit) return false;
+      for (let i = 1; i < path.points.length; i++) {
+        if (segmentDistanceSquared([x, z], path.points[i - 1], path.points[i]) < limit * limit) return true;
+      }
+      return false;
+    })) return false;
+    return true;
+  };
+  const samplePoint = () => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const localX = (rng() - 0.5) * width * 0.94;
+      const localZ = (rng() - 0.5) * depth * 0.94;
+      const x = origin[0] + localX;
+      const z = origin[1] + localZ;
+      if (inArea(x, z) && clearOfObjects(x, z)) return { localX, localZ, x, z };
+    }
+    return null;
+  };
+  const patches = Array.from({ length: patchCount }, () => {
+    const point = samplePoint();
+    return point ? { x: point.localX, z: point.localZ } : { x: 0, z: 0 };
+  });
   const deviation = Math.min(width, depth) / Math.sqrt(Math.max(patchCount, 1)) * 0.22;
   const positions = [];
   const marginX = Math.min(0.7, width * 0.05);
@@ -80,16 +139,18 @@ export function createGroundcover(seed, {
     let point = null;
     for (let attempt = 0; attempt < 80 && !point; attempt++) {
       const patch = patches[Math.floor(rng() * patchCount)];
-      const x = Math.max(-width * 0.5 + marginX, Math.min(width * 0.5 - marginX, patch.x + gaussian(rng) * deviation));
-      const z = Math.max(-depth * 0.5 + marginZ, Math.min(depth * 0.5 - marginZ, patch.z + gaussian(rng) * deviation));
+      const localX = Math.max(-width * 0.5 + marginX, Math.min(width * 0.5 - marginX, patch.x + gaussian(rng) * deviation));
+      const localZ = Math.max(-depth * 0.5 + marginZ, Math.min(depth * 0.5 - marginZ, patch.z + gaussian(rng) * deviation));
+      const x = origin[0] + localX;
+      const z = origin[1] + localZ;
       const spacingOkay = positions.every((other) => Math.hypot(x - other.x, z - other.z) >= minSpacing);
       const treeOkay = avoid.every((tree) => Math.hypot(x - tree.x, z - tree.z) >= (tree.radius ?? 0.65));
-      if (spacingOkay && treeOkay) point = { x, z };
+      if (inArea(x, z) && clearOfObjects(x, z) && spacingOkay && treeOkay) point = { x, z };
     }
     if (!point) {
-      const angle = i * 2.399963229728653;
-      const radius = Math.sqrt((i + 0.5) / Math.max(count, 1)) * Math.min(width, depth) * 0.48;
-      point = { x: Math.cos(angle) * radius, z: Math.sin(angle) * radius };
+      point = samplePoint();
+      if (!point || positions.some((other) => Math.hypot(point.x - other.x, point.z - other.z) < minSpacing) ||
+          avoid.some((tree) => Math.hypot(point.x - tree.x, point.z - tree.z) < (tree.radius ?? 0.65))) break;
     }
     point.y = terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, point.x, point.z, terrainParams);
     positions.push(point);
@@ -125,12 +186,12 @@ export function createGroundcover(seed, {
       type: "groundcover",
       version: 1,
       seed: seedValue,
-      params: { width, depth, count, biome, terrainSeed, terrainParams, treePositions },
-      measurements: { clumps: count, flowers: flowerCount, bladesApprox: positions.length * 5 },
+      params: { width, depth, count, biome, terrainSeed, terrainParams, treePositions, origin, areas, exclusions, avoidPaths },
+      measurements: { clumps: positions.length, flowers: flowerCount, bladesApprox: positions.length * 5 },
       motion: { kind: "wind", frequency: 2.1, amplitude: 0.16 },
       collider: { kind: "none" },
     },
-    bounds: { min: [-width * 0.5, -0.02, -depth * 0.5], max: [width * 0.5, 0.95, depth * 0.5] },
+    bounds: { min: [origin[0] - width * 0.5, -0.02, origin[1] - depth * 0.5], max: [origin[0] + width * 0.5, 0.95, origin[1] + depth * 0.5] },
     geometry,
   };
 }

@@ -12,6 +12,8 @@ An asset is described by a serializable specification containing its type, schem
 
 The cat tail currently uses the shared wind displacement in the vertex shader. The car is a static scene prop for now; its wheel layout, steering axis, and collider spec are ready for the vehicle physics controller increment.
 
+The OSM compiler now scatters seeded tree species and wind-weighted groundcover within mapped park, grass, and forest polygons. It clears vegetation around building buffers and mapped road and waterway corridors. Character movement and building collision still use a flat ground plane; terrain heightfields need a matching physics and navigation path.
+
 Generators use stable seed derivation rather than global `Math.random()`. Repeated instances are merged or batched by geometry where practical. Each uploaded mesh currently uses 16-bit indices and rejects more than 65,535 vertices; larger scenes must be split into batches. Low-end profiles should reduce instance count, mesh subdivisions, and render resolution before changing the art direction.
 
 ## Shader contract
@@ -29,6 +31,6 @@ Physics remains independent of rendering. Asset definitions provide simplified c
 3. Procedural rigs and motion definitions for people and animals; Jolt collider profiles.
 4. Vehicle generators and wheel/steering motion.
 5. Expand procedural rigs, actors, props, and environment motion while preserving low-end GPU budgets.
-6. Add an OpenStreetMap data adapter, world-feature conversion, attribution, and portable scene/asset export.
+6. Map OpenStreetMap features into playable spaces, preserve attribution and portable scene export, then connect terrain elevation to navigation and physics.
 
 OpenStreetMap data and tile services are separate concerns: the world pipeline should consume map data through a provider adapter and display required attribution. It must not assume the community raster tile server is an offline download source.

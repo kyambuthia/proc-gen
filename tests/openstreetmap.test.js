@@ -85,6 +85,7 @@ test("OSM ways become seeded, bounded meshes with portable attribution", () => {
   assert.ok(scene.meshes.roads.length > 0);
   assert.ok(scene.meshes.buildings.length > 0);
   assert.ok(scene.meshes.trees.length > 0, "mapped park receives seeded procedural trees");
+  assert.ok(scene.meshes.groundcover.length > 0, "mapped park receives bounded seeded grass and flowers");
   assert.ok(scene.meshes.rats.length > 0, "mapped park receives a seeded procedural rat population");
   for (const mesh of [...scene.meshes.water, ...scene.meshes.waterways]) {
     for (let i = 0; i < mesh.vertices.length; i += mesh.stride) {
