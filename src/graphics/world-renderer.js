@@ -82,6 +82,16 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
   const charcoalCat = getMesh("cat:charcoal", () => createAsset("cat", `${seed}:night`, { coat: "charcoal", size: 0.9 }).geometry);
   const car = getMesh("car", () => createAsset("car", seed, { paint: "lagoon" }).geometry);
   const bicycle = getMesh("bicycle", () => createAsset("bicycle", seed, { style: "city", paint: "citron" }).geometry);
+  let humanTemplates = createAsset("human", `${seed}:human-template`, { style: "street", palette: "lagoon", hairStyle: "crop" }).parts;
+  const humanParts = Object.fromEntries(["torso", "head", "upperArm", "foreArm", "thigh", "shin"].map((part) => [
+    part,
+    getMesh(`human:${part}`, () => humanTemplates[part]),
+  ]));
+  const humanFace = getMesh("human:face", () => humanTemplates.face);
+  humanTemplates = null;
+  const humanHair = (style) => getMesh(`human:hair:${style}`, () =>
+    createAsset("human", `${seed}:human-hair:${style}`, { style: "street", palette: "lagoon", hairStyle: style }).parts.hair,
+  );
   const supportsInstancing = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) >= 10;
   if (!supportsInstancing) throw new Error("WebGL 2 reports fewer than 10 vertex attributes; this renderer needs OpenGL ES 3.0 class support.");
 
@@ -113,7 +123,16 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
     gl.viewport(0, 0, width, height);
   }
 
-  function shapeFor(part) {
+  function shapeFor(part, character = null) {
+    if (character?.appearance) {
+      const key = part.name === "torso" || part.name === "head"
+        ? part.name
+        : part.name.startsWith("upperArm") ? "upperArm"
+          : part.name.startsWith("foreArm") ? "foreArm"
+            : part.name.startsWith("thigh") ? "thigh"
+              : part.name.startsWith("shin") ? "shin" : null;
+      if (key) return { mesh: humanParts[key], scale: [1, 1, 1] };
+    }
     if (part.kind === "box") return { mesh: box, scale: part.half.map((v) => v * 2) };
     if (part.kind === "sphere") return { mesh: sphere, scale: [part.radius, part.radius, part.radius] };
     const key = `capsule:${part.halfHeight}:${part.radius}`;
@@ -207,20 +226,32 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
     for (const character of world.characters) {
       const role = character.kind === "player" ? "player" : character.brain?.personality.role ?? "brawler";
       const baseTint = ROLE_TINT[role] ?? ROLE_TINT.brawler;
+      const look = character.appearance?.spec?.appearance;
       for (const part of character.ragdoll.parts) {
         if (part.dead) continue;
-        const shape = shapeFor(part);
+        const shape = shapeFor(part, character);
         const position = joltVec3(part.body.GetPosition());
         const rotation = joltQuat(part.body.GetRotation());
-        const base = character.state.mode === "dead"
+        const dead = character.state.mode === "dead";
+        const base = dead
           ? [0.34, 0.36, 0.39]
           : part.name === "head"
-            ? [0.92, 0.65, 0.43]
-            : baseTint;
+            ? look?.skin ?? [0.92, 0.65, 0.43]
+            : part.name === "torso" || part.name.startsWith("upperArm")
+              ? mix(look?.shirt ?? baseTint, baseTint, 0.24)
+              : part.name.startsWith("foreArm")
+                ? look?.skin ?? baseTint
+                : look?.pants ?? baseTint;
         const tint = character.state.flash > 0
           ? mix(base, [1, 0.28, 0.16], Math.min(1, character.state.flash * 4))
           : base;
         add(shape.mesh, transform4(position, rotation, shape.scale), tint);
+        if (part.name === "head" && character.appearance) {
+          const headTransform = transform4(position, rotation, [1, 1, 1]);
+          const hairColor = dead ? [0.34, 0.36, 0.39] : look?.hair ?? [0.12, 0.075, 0.055];
+          add(humanHair(character.appearance.spec.params.hairStyle), headTransform, hairColor);
+          add(humanFace, headTransform, dead ? [0.34, 0.36, 0.39] : WHITE);
+        }
       }
     }
 

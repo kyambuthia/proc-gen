@@ -24,8 +24,10 @@ mobile hardware with OpenGL ES 3.0 class support.
 
 Procedural assets use a seeded registry: `createAsset(type, seed, params)` builds geometry and a
 serializable spec; `serializeAsset` and `rebuildAsset` save and restore that recipe without storing
-GPU buffers. Current types are `tree`, `grove`, `rock`, `rock-field`, `cat`, `car`, `bicycle`, and `water`.
+GPU buffers. Current types are `tree`, `grove`, `rock`, `rock-field`, `cat`, `human`, `car`, `bicycle`, and `water`.
 Generated ponds, meandering rivers, and open water share the renderer's animated GLSL wave surface.
+Human assets carry a portable appearance, a compound collider, and the same versioned biped rig
+used by the Jolt active ragdolls; the running game applies each generated palette to its moving body parts.
 
 The OpenStreetMap adapter in `src/world/openstreetmap.js` compiles bounded Overpass data into seeded
 road, river, water, green-space, and building meshes. Choose **Play an OSM patch** in the game to
@@ -75,7 +77,7 @@ civilians run away.
 
 | File | What it does |
 | --- | --- |
-| `src/physics.js` | Jolt world: floor and replaceable scenery colliders, ragdoll bodies and joints, the ball, ray casts, and an event bus (`shot`, `gunshot`, `hit`, `death`) |
+| `src/physics.js` | Jolt world: floor and replaceable scenery colliders, shared procedural human ragdoll, the ball, ray casts, and an event bus (`shot`, `gunshot`, `hit`, `death`) |
 | `src/character.js` | The active-ragdoll controller: joint motors, capture-point stepping with two-link leg IK, balance assists, knock-down and get-up, punch, kick, carry and throw, aim and shoot |
 | `src/ai.js` | NPC brains: perception (view cone, line of sight, hearing, memory) and utility-scored behaviours (wander, investigate, chase with flanking, flee, shoot, take cover) |
 | `src/nav.js` | Navigation grid with step, jump and drop moves; A* with string-pulling; reachability flood fill |
@@ -90,6 +92,8 @@ civilians run away.
 | `src/procedural/mesh-builder.js` | CPU mesh construction for boxes, ellipsoids, capsules, and merged assets |
 | `src/procedural/assets.js` | Public registry and JSON import/export for generated asset recipes, including water surfaces |
 | `src/procedural/bicycle.js` | Seeded city, mountain, and cargo bicycles with wheel, steering, pedal, and collider recipes |
+| `src/procedural/human.js` | Seeded human geometry, appearance palettes, face/hair, ragdoll collider recipe, and portable motion rig |
+| `src/procedural/humanoid-rig.js` | Shared biped body parts and joint limits used by asset generation and Jolt physics |
 | `src/procedural/water.js` | Seeded pond, meandering river, and open-water geometry with a portable shader-wave recipe |
 | `src/world/openstreetmap.js` | Bounded Overpass requests, OSM way parsing, mesh compilation, building colliders, and portable scene import/export |
 

@@ -4,6 +4,7 @@ import { nav, rebuildNav } from "./nav.js";
 import { createWorld, RAGDOLL_FOOT_OFFSET } from "./physics.js";
 import { createWorldRenderer } from "./graphics/world-renderer.js";
 import { createWaveDirector } from "./waves.js";
+import { createAsset } from "./procedural/assets.js";
 import {
   createOsmObstacleBoxes,
   createOsmScene,
@@ -138,6 +139,9 @@ export async function startGame() {
   const spawn = (at, opts) => {
     const character = world.spawnCharacter(at, opts);
     character.id = nextId++;
+    const appearanceStyle = opts.appearanceStyle ?? (opts.kind === "player" ? "sport" : "street");
+    const human = createAsset("human", `${seed ?? "classic"}:human:${character.id}`, { style: appearanceStyle });
+    character.appearance = { spec: human.spec };
     return character;
   };
   const spawnNpc = (role, [x, z], yaw = Math.random() * Math.PI * 2) => {
@@ -146,6 +150,7 @@ export async function startGame() {
       name: `${role} ${nextId}`,
       yaw,
       armed: role === "gunner",
+      appearanceStyle: role === "gunner" ? "work" : role === "civilian" ? "festival" : "street",
     });
     character.brain = createBrain(character, world, { origin: [x, z], role });
     return character;

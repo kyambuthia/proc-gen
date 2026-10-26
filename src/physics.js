@@ -2,6 +2,7 @@ import initJolt from "jolt-physics";
 import { createCharacter } from "./character.js";
 import { OBSTACLES, setObstacles as replaceObstacles } from "./scenery.js";
 import { qRot, rayVsBox, rayVsCapsule, rayVsSphere } from "./math.js";
+import { HUMANOID_FOOT_LIFT, HUMANOID_JOINTS as JOINTS, HUMANOID_PARTS as PARTS, SIDE, UP } from "./procedural/humanoid-rig.js";
 
 const LAYER_STATIC = 0;
 const LAYER_RAGDOLL = 1;
@@ -10,46 +11,12 @@ const LAYER_HELD = 3; // the ball while someone carries it: collides with nothin
 const NUM_LAYERS = 4;
 const NUM_BROAD_PHASE_LAYERS = 2;
 
-// Body parts of a standing figure, in metres, relative to the feet-level origin.
-// Capsules are y-aligned; halfHeight is the half-length of the cylindrical section.
-const PARTS = [
-  { name: "torso", kind: "box", half: [0.25, 0.35, 0.13], pos: [0, 1.15, 0] },
-  { name: "head", kind: "sphere", radius: 0.17, pos: [0, 1.72, 0] },
-  { name: "upperArmL", kind: "capsule", halfHeight: 0.14, radius: 0.06, pos: [-0.33, 1.25, 0] },
-  { name: "upperArmR", kind: "capsule", halfHeight: 0.14, radius: 0.06, pos: [0.33, 1.25, 0] },
-  { name: "foreArmL", kind: "capsule", halfHeight: 0.13, radius: 0.05, pos: [-0.33, 0.87, 0] },
-  { name: "foreArmR", kind: "capsule", halfHeight: 0.13, radius: 0.05, pos: [0.33, 0.87, 0] },
-  { name: "thighL", kind: "capsule", halfHeight: 0.19, radius: 0.09, pos: [-0.13, 0.52, 0] },
-  { name: "thighR", kind: "capsule", halfHeight: 0.19, radius: 0.09, pos: [0.13, 0.52, 0] },
-  { name: "shinL", kind: "capsule", halfHeight: 0.18, radius: 0.07, pos: [-0.13, -0.01, 0] },
-  { name: "shinR", kind: "capsule", halfHeight: 0.18, radius: 0.07, pos: [0.13, -0.01, 0] },
-];
-
-const DOWN = [0, -1, 0];
-const UP = [0, 1, 0];
-const SIDE = [1, 0, 0];
-
-// swing = half cone angle (radians), twist = +/- twist limit (radians).
-// hinge = [min, max] angle about the side axis; used for knees and elbows, which only bend one way.
-// torque = strength of the motor that drives the joint toward its target pose.
-const JOINTS = [
-  { a: "torso", b: "head", pos: [0, 1.52, 0], axis: UP, swing: 0.5, twist: 0.5, torque: 150 },
-  { a: "torso", b: "upperArmL", pos: [-0.33, 1.4, 0], axis: DOWN, swing: 2.4, twist: 0.5, torque: 250 },
-  { a: "torso", b: "upperArmR", pos: [0.33, 1.4, 0], axis: DOWN, swing: 2.4, twist: 0.5, torque: 250 },
-  { a: "upperArmL", b: "foreArmL", pos: [-0.33, 1.07, 0], hinge: [-2.4, 0], torque: 150 },
-  { a: "upperArmR", b: "foreArmR", pos: [0.33, 1.07, 0], hinge: [-2.4, 0], torque: 150 },
-  { a: "torso", b: "thighL", pos: [-0.13, 0.8, 0], axis: DOWN, swing: 1.2, twist: 0.3, torque: 900 },
-  { a: "torso", b: "thighR", pos: [0.13, 0.8, 0], axis: DOWN, swing: 1.2, twist: 0.3, torque: 900 },
-  { a: "thighL", b: "shinL", pos: [-0.13, 0.24, 0], hinge: [0, 2.4], torque: 700 },
-  { a: "thighR", b: "shinR", pos: [0.13, 0.24, 0], hinge: [0, 2.4], torque: 700 },
-];
-
 export { OBSTACLES };
 
 // The player is a capsule 2.1 m tall; its origin is the capsule centre.
 export const PLAYER = { halfHeight: 0.75, radius: 0.3, centerHeight: 1.05 };
 // Lowest point of the ragdoll pose relative to its origin (bottom of the shins).
-export const RAGDOLL_FOOT_OFFSET = 0.26;
+export const RAGDOLL_FOOT_OFFSET = HUMANOID_FOOT_LIFT;
 
 // A soccer ball: light enough to be kicked about, bouncy, with continuous collision so a hard
 // kick cannot tunnel through a wall or a leg.

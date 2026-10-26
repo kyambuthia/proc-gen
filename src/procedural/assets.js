@@ -4,6 +4,7 @@ import "./rock.js";
 import "./cat.js";
 import "./car.js";
 import "./bicycle.js";
+import "./human.js";
 import "./water.js";
 
 export {
@@ -19,4 +20,5 @@ export { createRock, createRockField } from "./rock.js";
 export { createCat } from "./cat.js";
 export { createCar } from "./car.js";
 export { createBicycle } from "./bicycle.js";
+export { createHuman } from "./human.js";
 export { createWater } from "./water.js";

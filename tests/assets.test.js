@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { HUMANOID_FOOT_LIFT, HUMANOID_JOINTS, HUMANOID_PARTS } from "../src/procedural/humanoid-rig.js";
 import {
   createAsset,
   deserializeAsset,
@@ -15,11 +16,12 @@ const arrays = (asset) => ({
 });
 
 test("built-in generators produce repeatable geometry from a type and seed", () => {
-  assert.deepEqual(listAssetTypes(), ["bicycle", "car", "cat", "grove", "rock", "rock-field", "tree", "water"]);
+  assert.deepEqual(listAssetTypes(), ["bicycle", "car", "cat", "grove", "human", "rock", "rock-field", "tree", "water"]);
   for (const [type, params] of [
     ["bicycle", { style: "mountain", paint: "coral", size: 1.1 }],
     ["car", { paint: "coral", size: 1.1 }],
     ["cat", { coat: "cream", size: 0.9 }],
+    ["human", { style: "festival", palette: "earth", hairStyle: "bun" }],
     ["tree", { variant: "broadleaf" }],
     ["grove", { count: 5 }],
     ["rock", { variant: "ochre", size: 1.25 }],
@@ -63,6 +65,21 @@ test("bicycle variants stay inside their declared bounds and scale uniformly", (
   for (let i = 0; i < unit.geometry.vertices.length; i += unit.geometry.stride) {
     for (let axis = 0; axis < 3; axis++) assert.ok(Math.abs(large.geometry.vertices[i + axis] - unit.geometry.vertices[i + axis] * 1.5) < 1e-5);
   }
+});
+
+test("human asset geometry, motion, and collision share the active ragdoll rig", () => {
+  const human = createAsset("human", "town-person", { style: "work" });
+  assert.equal(human.spec.motion.kind, "active-ragdoll");
+  assert.equal(human.spec.motion.rigVersion, 1);
+  assert.equal(human.spec.motion.controller, "capture-point-biped");
+  assert.equal(human.spec.collider.kind, "compound");
+  assert.equal(human.spec.collider.children.length, HUMANOID_PARTS.length);
+  assert.equal(human.spec.motion.joints.length, HUMANOID_JOINTS.length);
+  assert.deepEqual(human.spec.collider.children.map(({ name, kind }) => ({ name, kind })), HUMANOID_PARTS.map(({ name, kind }) => ({ name, kind })));
+  assert.equal(human.spec.collider.children.find(({ name }) => name === "shinL").center[1], (HUMANOID_PARTS.find(({ name }) => name === "shinL").pos[1] + HUMANOID_FOOT_LIFT));
+  assert.ok(human.parts.face.indices.length > 0);
+  assert.ok(human.parts.hair.indices.length > 0);
+  assert.ok(human.spec.appearance.shirt.every((channel) => channel >= 0 && channel <= 1));
 });
 
 test("animal and vehicle assets declare motion and simplified colliders", () => {
