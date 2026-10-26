@@ -81,6 +81,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
   const gingerCat = getMesh("cat:ginger", () => createAsset("cat", seed, { coat: "ginger" }).geometry);
   const charcoalCat = getMesh("cat:charcoal", () => createAsset("cat", `${seed}:night`, { coat: "charcoal", size: 0.9 }).geometry);
   const car = getMesh("car", () => createAsset("car", seed, { paint: "lagoon" }).geometry);
+  const bicycle = getMesh("bicycle", () => createAsset("bicycle", seed, { style: "city", paint: "citron" }).geometry);
   const supportsInstancing = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) >= 10;
   if (!supportsInstancing) throw new Error("WebGL 2 reports fewer than 10 vertex attributes; this renderer needs OpenGL ES 3.0 class support.");
 
@@ -159,6 +160,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
       car: take([2.3, 2.7]),
       ginger: take([1.4, 1.4]),
       charcoal: take([1.5, 1.2]),
+      bicycle: take([0.4, 1.15]),
     };
   }
 
@@ -234,6 +236,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
       add(gingerCat, transform4(decorations.ginger, yawRotation(-0.7), [1, 1, 1]), WHITE);
       add(charcoalCat, transform4(decorations.charcoal, yawRotation(1.2), [1, 1, 1]), WHITE);
       add(car, transform4(decorations.car, yawRotation(-0.45), [1, 1, 1]), WHITE);
+      add(bicycle, transform4(decorations.bicycle, yawRotation(0.85), [1, 1, 1]), WHITE);
     }
 
     const hero = game.hero;

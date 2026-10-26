@@ -15,8 +15,9 @@ const arrays = (asset) => ({
 });
 
 test("built-in generators produce repeatable geometry from a type and seed", () => {
-  assert.deepEqual(listAssetTypes(), ["car", "cat", "grove", "rock", "rock-field", "tree", "water"]);
+  assert.deepEqual(listAssetTypes(), ["bicycle", "car", "cat", "grove", "rock", "rock-field", "tree", "water"]);
   for (const [type, params] of [
+    ["bicycle", { style: "mountain", paint: "coral", size: 1.1 }],
     ["car", { paint: "coral", size: 1.1 }],
     ["cat", { coat: "cream", size: 0.9 }],
     ["tree", { variant: "broadleaf" }],
@@ -47,9 +48,27 @@ test("water assets carry a shader surface id and a portable wave recipe", () => 
   assert.throws(() => createAsset("water", 1, { shape: "lake" }), /Unknown water shape/);
 });
 
+test("bicycle variants stay inside their declared bounds and scale uniformly", () => {
+  for (const style of ["city", "mountain", "cargo"]) {
+    const bike = createAsset("bicycle", `bounds:${style}`, { style, size: 1.2 });
+    for (let i = 0; i < bike.geometry.vertices.length; i += bike.geometry.stride) {
+      for (let axis = 0; axis < 3; axis++) {
+        assert.ok(bike.geometry.vertices[i + axis] >= bike.bounds.min[axis] - 1e-4);
+        assert.ok(bike.geometry.vertices[i + axis] <= bike.bounds.max[axis] + 1e-4);
+      }
+    }
+  }
+  const unit = createAsset("bicycle", "scale-bicycle", { size: 1 });
+  const large = createAsset("bicycle", "scale-bicycle", { size: 1.5 });
+  for (let i = 0; i < unit.geometry.vertices.length; i += unit.geometry.stride) {
+    for (let axis = 0; axis < 3; axis++) assert.ok(Math.abs(large.geometry.vertices[i + axis] - unit.geometry.vertices[i + axis] * 1.5) < 1e-5);
+  }
+});
+
 test("animal and vehicle assets declare motion and simplified colliders", () => {
   const cat = createAsset("cat", 91, { coat: "ginger" });
   const car = createAsset("car", 92, { paint: "lagoon" });
+  const bicycle = createAsset("bicycle", 93, { style: "city" });
   assert.equal(cat.spec.motion.kind, "wind-driven-tail");
   assert.equal(cat.spec.collider.kind, "compound");
   assert.ok(cat.spec.collider.children.length >= 6);
@@ -58,6 +77,11 @@ test("animal and vehicle assets declare motion and simplified colliders", () => 
   assert.equal(car.spec.motion.wheels.length, 4);
   assert.equal(car.spec.collider.kind, "compound");
   assert.equal(car.spec.collider.children.length, 2);
+  assert.equal(bicycle.spec.motion.kind, "bicycle");
+  assert.equal(bicycle.spec.motion.wheels.length, 2);
+  assert.equal(bicycle.spec.motion.wheels.filter((wheel) => wheel.steering).length, 1);
+  assert.equal(bicycle.spec.collider.kind, "compound");
+  assert.ok(bicycle.geometry.indices.length > 1000, "bicycle includes frame, tire, rim, and spoke geometry");
 });
 
 test("asset specs round-trip and rebuild without serializing GPU geometry", () => {

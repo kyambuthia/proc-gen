@@ -24,7 +24,7 @@ mobile hardware with OpenGL ES 3.0 class support.
 
 Procedural assets use a seeded registry: `createAsset(type, seed, params)` builds geometry and a
 serializable spec; `serializeAsset` and `rebuildAsset` save and restore that recipe without storing
-GPU buffers. Current types are `tree`, `grove`, `rock`, `rock-field`, `cat`, `car`, and `water`.
+GPU buffers. Current types are `tree`, `grove`, `rock`, `rock-field`, `cat`, `car`, `bicycle`, and `water`.
 Generated ponds, meandering rivers, and open water share the renderer's animated GLSL wave surface.
 
 The OpenStreetMap adapter in `src/world/openstreetmap.js` compiles bounded Overpass data into seeded
@@ -84,11 +84,12 @@ civilians run away.
 | `src/scenery.js` | The live obstacle list and ground-height helpers |
 | `src/waves.js` | Wave survival director: rosters, spawning, scoring, medkits |
 | `src/raw-game.js` | Direct-render game loop, keyboard/touch controls, OSM patch fetch/import/export, HUD, minimap, and combat |
-| `src/graphics/world-renderer.js` | Raw WebGL 2 batches for the playable scene and imported map chunks |
+| `src/graphics/world-renderer.js` | Raw WebGL 2 batches for the playable scene, procedural props, and imported map chunks |
 | `src/graphics/webgl2.js` | Shader compilation, GPU buffers, and instanced mesh upload |
 | `src/graphics/painterly-shader.js` | Direct GLSL ES 3.00 shaders for painterly lighting, wind sway, and animated water |
 | `src/procedural/mesh-builder.js` | CPU mesh construction for boxes, ellipsoids, capsules, and merged assets |
 | `src/procedural/assets.js` | Public registry and JSON import/export for generated asset recipes, including water surfaces |
+| `src/procedural/bicycle.js` | Seeded city, mountain, and cargo bicycles with wheel, steering, pedal, and collider recipes |
 | `src/procedural/water.js` | Seeded pond, meandering river, and open-water geometry with a portable shader-wave recipe |
 | `src/world/openstreetmap.js` | Bounded Overpass requests, OSM way parsing, mesh compilation, building colliders, and portable scene import/export |
 
