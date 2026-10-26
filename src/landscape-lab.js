@@ -29,6 +29,10 @@ const TREE_COLORS = {
   bamboo: "#59ae58",
   "cloud-pine": "#348c88",
   cypress: "#557f74",
+  ume: "#f4a0ae",
+  momiji: "#e64e32",
+  akamatsu: "#3c816d",
+  hinoki: "#6c9b62",
 };
 const TREE_COUNT = 36;
 const GROUND_COVER_COUNT = 680;
@@ -74,6 +78,7 @@ function growLandscape() {
       count: TREE_COUNT,
       width: 44,
       depth: 44,
+      biome,
       terrainSeed: nextTerrain.spec.seed,
       terrainParams: nextTerrain.spec.params,
     });
@@ -122,7 +127,7 @@ function syncStats(terrain, grove, groundcover) {
     + groundcover.geometry.vertices.byteLength + groundcover.geometry.indices.byteLength;
   document.querySelector("#terrain-stat").textContent = `${terrain.spec.params.width} × ${terrain.spec.params.depth} m · ${terrain.spec.measurements.minHeight.toFixed(1)} to ${terrain.spec.measurements.maxHeight.toFixed(1)} m`;
   document.querySelector("#tree-stat").textContent = `${grove.spec.children.length} trees · terrain-following trunks`;
-  document.querySelector("#cover-stat").textContent = `${groundcover.spec.measurements.clumps} clumps · ${groundcover.spec.measurements.fernClumps} ferns · ${groundcover.spec.measurements.shrubClumps} shrubs · ${groundcover.spec.measurements.flowers} blooms`;
+  document.querySelector("#cover-stat").textContent = `${groundcover.spec.measurements.clumps} clumps · ${groundcover.spec.measurements.fernClumps} ferns · ${groundcover.spec.measurements.shrubClumps} shrubs · ${groundcover.spec.measurements.rosetteClumps} rosettes · ${groundcover.spec.measurements.flowers} blooms`;
   document.querySelector("#gpu-stat").textContent = `${vertices.toLocaleString()} verts · ${triangles.toLocaleString()} tris · ${(bytes / 1024).toFixed(0)} KiB · 3 draws`;
 
   const species = new Map();

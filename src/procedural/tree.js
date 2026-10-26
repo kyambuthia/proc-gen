@@ -6,6 +6,7 @@ import { sampleTerrainHeight } from "./terrain.js";
 export const TREE_VARIANTS = [
   "broadleaf", "sakura", "red-maple", "evergreen", "willow", "ginkgo",
   "birch", "flame", "wisteria", "bamboo", "cloud-pine", "cypress",
+  "ume", "momiji", "akamatsu", "hinoki",
 ];
 
 const BARK = {
@@ -21,6 +22,10 @@ const BARK = {
   bamboo: [[0.23, 0.42, 0.23], [0.31, 0.52, 0.28], [0.42, 0.62, 0.33]],
   "cloud-pine": [[0.3, 0.2, 0.14], [0.42, 0.28, 0.18], [0.53, 0.37, 0.22]],
   cypress: [[0.29, 0.2, 0.15], [0.4, 0.27, 0.18], [0.5, 0.34, 0.23]],
+  ume: [[0.31, 0.15, 0.12], [0.48, 0.25, 0.17], [0.6, 0.35, 0.22]],
+  momiji: [[0.3, 0.13, 0.11], [0.46, 0.2, 0.13], [0.58, 0.3, 0.16]],
+  akamatsu: [[0.3, 0.18, 0.12], [0.43, 0.26, 0.16], [0.54, 0.34, 0.2]],
+  hinoki: [[0.33, 0.23, 0.16], [0.47, 0.31, 0.2], [0.58, 0.39, 0.24]],
 };
 
 const LEAVES = {
@@ -36,6 +41,10 @@ const LEAVES = {
   bamboo: [[0.14, 0.42, 0.25], [0.25, 0.57, 0.31], [0.44, 0.68, 0.35], [0.61, 0.72, 0.37]],
   "cloud-pine": [[0.035, 0.25, 0.22], [0.07, 0.39, 0.27], [0.12, 0.49, 0.32], [0.2, 0.58, 0.4]],
   cypress: [[0.035, 0.26, 0.23], [0.07, 0.38, 0.3], [0.14, 0.49, 0.39], [0.22, 0.56, 0.44]],
+  ume: [[0.32, 0.53, 0.27], [0.53, 0.69, 0.34], [0.97, 0.48, 0.68], [1, 0.76, 0.82], [0.97, 0.88, 0.72]],
+  momiji: [[0.57, 0.1, 0.13], [0.83, 0.17, 0.11], [0.97, 0.35, 0.1], [0.95, 0.58, 0.12], [0.51, 0.24, 0.18]],
+  akamatsu: [[0.035, 0.23, 0.2], [0.05, 0.34, 0.26], [0.1, 0.45, 0.31], [0.19, 0.52, 0.38]],
+  hinoki: [[0.12, 0.31, 0.2], [0.19, 0.42, 0.26], [0.31, 0.53, 0.32], [0.46, 0.61, 0.37]],
 };
 
 const TREE_STYLE = {
@@ -51,6 +60,16 @@ const TREE_STYLE = {
   bamboo: { height: [4.2, 6.2], crown: 0.88, spread: 1.2, clusters: [3, 5], crownKind: "bamboo" },
   "cloud-pine": { height: [3.4, 5.3], crown: 0.67, spread: 1.42, clusters: [8, 12], crownKind: "cloud-pine" },
   cypress: { height: [4.6, 6.8], crown: 0.82, spread: 0.72, clusters: [5, 8], crownKind: "cypress" },
+  ume: { height: [2.8, 4.1], crown: 0.65, spread: 1.42, clusters: [15, 21], crownKind: "blossom" },
+  momiji: { height: [3.2, 4.9], crown: 0.68, spread: 1.48, clusters: [9, 14], crownKind: "maple" },
+  akamatsu: { height: [4.2, 6.5], crown: 0.7, spread: 1.5, clusters: [5, 7], crownKind: "swept-pine" },
+  hinoki: { height: [4.8, 6.9], crown: 0.84, spread: 1.02, clusters: [6, 9], crownKind: "hinoki" },
+};
+
+const GROVE_SPECIES = {
+  meadow: ["broadleaf", "broadleaf", "sakura", "red-maple", "evergreen", "willow", "ginkgo", "birch", "flame", "wisteria", "bamboo", "cloud-pine", "cypress", "ume", "momiji", "akamatsu", "hinoki"],
+  autumn: ["broadleaf", "red-maple", "red-maple", "ginkgo", "flame", "flame", "momiji", "momiji", "willow", "birch", "akamatsu", "hinoki", "evergreen"],
+  highland: ["evergreen", "evergreen", "cloud-pine", "cypress", "akamatsu", "hinoki", "birch", "bamboo", "willow", "broadleaf"],
 };
 
 const choose = (rng, values) => values[Math.floor(rng() * values.length)];
@@ -106,6 +125,84 @@ function buildCrown(mesh, rng, variant, style, crownY, height, spread) {
       const y = crownY * (0.34 + fraction * 0.82);
       const radius = spread * (0.72 - fraction * 0.61) * (0.9 + rng() * 0.16);
       addCone(mesh, y, radius, Math.min(1.5, height * 0.3), choose(rng, palette), 7, 0.34 + fraction * 0.24);
+    }
+    return;
+  }
+
+  if (style.crownKind === "hinoki") {
+    for (let tier = 0; tier < 7; tier++) {
+      const fraction = tier / 7;
+      const y = crownY * (0.46 + fraction * 0.68);
+      const radius = spread * (0.98 - fraction * 0.76) * (0.94 + rng() * 0.12);
+      const lobes = 5 + (tier % 2);
+      for (let lobe = 0; lobe < lobes; lobe++) {
+        const angle = (lobe / lobes) * Math.PI * 2 + rng() * 0.14;
+        const reach = radius * (0.32 + rng() * 0.16);
+        const color = choose(rng, palette);
+        mesh.addEllipsoid(
+          [Math.cos(angle) * reach, y + (rng() - 0.5) * 0.12, Math.sin(angle) * reach],
+          [0.34 + radius * 0.32, 0.23 + rng() * 0.08, 0.31 + radius * 0.28],
+          color, 6, 3, 0.42 + fraction * 0.28,
+        );
+      }
+    }
+    return;
+  }
+
+  if (style.crownKind === "swept-pine") {
+    const lean = (rng() - 0.5) * spread * 0.42;
+    for (let tier = 0; tier < 5; tier++) {
+      const fraction = tier / 5;
+      const y = crownY - 0.62 + fraction * (height - crownY + 0.28);
+      const radius = spread * (0.82 - fraction * 0.55) * (0.9 + rng() * 0.18);
+      const lobes = 4 + (tier % 2);
+      for (let lobe = 0; lobe < lobes; lobe++) {
+        const angle = (lobe / lobes) * Math.PI * 2 + rng() * 0.22;
+        const reach = radius * (0.38 + rng() * 0.26);
+        const direction = Math.cos(angle) * 0.32 + 0.68;
+        mesh.addEllipsoid(
+          [lean * fraction + Math.cos(angle) * reach * direction, y, Math.sin(angle) * reach],
+          [0.46 + radius * 0.24, 0.18 + rng() * 0.1, 0.31 + radius * 0.22],
+          choose(rng, palette), 6, 3, 0.5 + fraction * 0.38,
+        );
+      }
+    }
+    return;
+  }
+
+  if (style.crownKind === "blossom") {
+    const branchCount = 5 + Math.floor(rng() * 3);
+    for (let branch = 0; branch < branchCount; branch++) {
+      const angle = (branch / branchCount) * Math.PI * 2 + rng() * 0.3;
+      const reach = spread * (0.42 + rng() * 0.46);
+      const y = crownY + (rng() - 0.5) * 0.46;
+      const center = [Math.cos(angle) * reach, y, Math.sin(angle) * reach];
+      mesh.addEllipsoid(center, [0.37 + rng() * 0.12, 0.27 + rng() * 0.14, 0.34 + rng() * 0.12], choose(rng, palette), 6, 3, 0.84);
+      for (let flower = 0; flower < 2; flower++) {
+        const blossom = choose(rng, [[1, 0.82, 0.84], [1, 0.6, 0.73], [0.99, 0.91, 0.78]]);
+        const offset = (rng() - 0.5) * 0.22;
+        mesh.addEllipsoid([center[0] + offset, center[1] + 0.17 + rng() * 0.12, center[2] - offset], [0.13, 0.105, 0.13], blossom, 5, 2, 0.92);
+      }
+    }
+    return;
+  }
+
+  if (style.crownKind === "maple") {
+    const levels = 4;
+    for (let level = 0; level < levels; level++) {
+      const fraction = level / (levels - 1);
+      const y = crownY - 0.3 + fraction * 0.95;
+      const lobes = 5 + (level % 2);
+      const levelRadius = spread * (0.52 + (1 - fraction) * 0.28);
+      for (let lobe = 0; lobe < lobes; lobe++) {
+        const angle = (lobe / lobes) * Math.PI * 2 + rng() * 0.22;
+        const reach = levelRadius * (0.46 + rng() * 0.28);
+        mesh.addEllipsoid(
+          [Math.cos(angle) * reach, y + (rng() - 0.5) * 0.24, Math.sin(angle) * reach],
+          [0.38 + rng() * 0.12, 0.28 + rng() * 0.12, 0.34 + rng() * 0.12],
+          choose(rng, palette), 6, 3, 0.86,
+        );
+      }
     }
     return;
   }
@@ -251,15 +348,17 @@ export function createGrove(seed, count = 7, options = {}) {
   const depth = options.depth ?? width;
   const terrainSeed = options.terrainSeed ?? null;
   const terrainParams = options.terrainParams ?? {};
+  const biome = options.biome ?? "meadow";
   if (!Number.isInteger(count) || count < 0) throw new RangeError("Grove count must be a non-negative integer");
   if (!Number.isFinite(width) || !Number.isFinite(depth) || width <= 0 || depth <= 0) throw new RangeError("Grove dimensions must be positive");
+  if (!GROVE_SPECIES[biome]) throw new RangeError(`Unknown grove biome: ${biome}`);
 
   const merged = new MeshBuilder();
   const trees = [];
   const seedValue = hashSeed(seed);
   const rng = createRng(deriveSeed(seedValue, "grove-layout"));
-  const patchCount = count === 0 ? 0 : Math.max(1, Math.min(8, Math.ceil(Math.sqrt(count))));
-  const speciesOrder = [...TREE_VARIANTS];
+  const patchCount = count === 0 ? 0 : Math.max(1, Math.min(10, Math.ceil(Math.sqrt(count * 1.5))));
+  const speciesOrder = [...new Set(GROVE_SPECIES[biome])];
   for (let i = speciesOrder.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
     [speciesOrder[i], speciesOrder[j]] = [speciesOrder[j], speciesOrder[i]];
@@ -271,7 +370,7 @@ export function createGrove(seed, count = 7, options = {}) {
   const positions = [];
   const margin = Math.min(2, width * 0.12, depth * 0.12);
   const minDistance = Math.max(1.55, Math.min(2.7, Math.min(width, depth) / Math.sqrt(Math.max(count, 1)) * 1.12));
-  const standardDeviation = Math.min(width, depth) / Math.sqrt(Math.max(patchCount, 1)) * 0.25;
+  const standardDeviation = Math.min(width, depth) / Math.sqrt(Math.max(patchCount, 1)) * 0.29;
   for (let i = 0; i < count; i++) {
     let position = null;
     for (let attempt = 0; attempt < 320 && !position; attempt++) {
@@ -283,7 +382,7 @@ export function createGrove(seed, count = 7, options = {}) {
       ];
       const clearance = attempt < 200 ? minDistance : minDistance * 0.82;
       if (positions.every((other) => Math.hypot(candidate[0] - other.x, candidate[1] - other.z) >= clearance)) {
-        const variant = i < patchCount || rng() < 0.78 ? patch.variant : choose(rng, TREE_VARIANTS);
+        const variant = i < patchCount || rng() < 0.78 ? patch.variant : choose(rng, GROVE_SPECIES[biome]);
         position = { x: candidate[0], z: candidate[1], variant };
       }
     }
@@ -309,7 +408,7 @@ export function createGrove(seed, count = 7, options = {}) {
   for (let i = 0; i < positions.length; i++) {
     const item = positions[i];
     const tree = createTree(deriveSeed(seedValue, `tree-${i}`), { variant: item.variant });
-    const scale = 0.76 + rng() * 0.42;
+    const scale = 0.7 + rng() * 0.58;
     const y = terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, item.x, item.z, terrainParams);
     const position = [item.x, y, item.z];
     merged.append(tree.geometry, position, scale);
@@ -334,7 +433,7 @@ export function createGrove(seed, count = 7, options = {}) {
       type: "grove",
       version: 1,
       seed: seedValue,
-      params: { count, width, depth, terrainSeed, terrainParams },
+      params: { count, width, depth, terrainSeed, terrainParams, biome },
       measurements: { trees: count, species: Object.fromEntries(TREE_VARIANTS.map((variant) => [variant, trees.filter((tree) => tree.params.variant === variant).length]).filter(([, amount]) => amount > 0)) },
       motion: { kind: "child-composition" },
       collider: {

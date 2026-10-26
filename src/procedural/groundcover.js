@@ -193,6 +193,7 @@ export function createGroundcover(seed, {
   let flowerCount = 0;
   let fernCount = 0;
   let shrubCount = 0;
+  let rosetteCount = 0;
   let bladeCount = 0;
   let leafCount = 0;
   let foliageClumps = 0;
@@ -200,14 +201,16 @@ export function createGroundcover(seed, {
   for (const point of positions) {
     const vertexStart = mesh.vertices.length;
     const indexStart = mesh.indices.length;
-    const countsBefore = [flowerCount, fernCount, shrubCount, bladeCount, leafCount, foliageClumps];
+    const countsBefore = [flowerCount, fernCount, shrubCount, rosetteCount, bladeCount, leafCount, foliageClumps];
     const blades = 3 + Math.floor(rng() * 3);
     const clumpRadius = 0.2 + rng() * 0.22;
     const foliageKind = rng();
     const hasFern = foliageKind < (biome === "forest" ? 0.2 : 0.11);
     const hasShrub = !hasFern && foliageKind < (biome === "forest" ? 0.34 : 0.23);
-    for (let blade = 0; blade < blades; blade++) {
-      const angle = (blade / blades) * Math.PI * 2 + rng() * 0.7;
+    const hasRosette = !hasFern && !hasShrub && rng() < (biome === "forest" ? 0.14 : 0.18);
+    const bladeCountForClump = blades + (rng() < 0.2 ? 1 : 0);
+    for (let blade = 0; blade < bladeCountForClump; blade++) {
+      const angle = (blade / bladeCountForClump) * Math.PI * 2 + rng() * 0.7;
       const radial = clumpRadius * (0.15 + rng() * 0.8);
       const x = point.x + Math.cos(angle) * radial;
       const z = point.z + Math.sin(angle) * radial;
@@ -269,6 +272,25 @@ export function createGroundcover(seed, {
       leafCount += lobes;
     }
 
+    if (hasRosette) {
+      rosetteCount++;
+      foliageClumps++;
+      const leafColor = choose(rng, palette.grass);
+      const leafCountForPlant = 4 + Math.floor(rng() * 3);
+      for (let leaf = 0; leaf < leafCountForPlant; leaf++) {
+        const angle = (leaf / leafCountForPlant) * Math.PI * 2 + rng() * 0.42;
+        const length = 0.23 + rng() * 0.13;
+        const startY = terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, point.x, point.z, terrainParams);
+        const endX = point.x + Math.cos(angle) * length;
+        const endZ = point.z + Math.sin(angle) * length;
+        const endY = (terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, endX, endZ, terrainParams)) + 0.13 + rng() * 0.06;
+        addLeaf(mesh, [point.x, startY + 0.035, point.z], [endX, endY, endZ], 0.07, leafColor, 0.72);
+        leafCount++;
+      }
+      const budY = (terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, point.x, point.z, terrainParams)) + 0.12;
+      mesh.addEllipsoid([point.x, budY, point.z], [0.045, 0.035, 0.045], choose(rng, palette.flower), 4, 2, 0.4);
+    }
+
     if (rng() < (biome === "forest" ? 0.045 : 0.085)) {
       const flower = choose(rng, palette.flower);
       const size = biome === "forest" ? 0.075 : 0.1;
@@ -284,7 +306,7 @@ export function createGroundcover(seed, {
     if (mesh.vertices.length / VERTEX_STRIDE > 65535) {
       mesh.vertices.length = vertexStart;
       mesh.indices.length = indexStart;
-      [flowerCount, fernCount, shrubCount, bladeCount, leafCount, foliageClumps] = countsBefore;
+      [flowerCount, fernCount, shrubCount, rosetteCount, bladeCount, leafCount, foliageClumps] = countsBefore;
       break;
     }
     renderedClumps++;
@@ -307,9 +329,10 @@ export function createGroundcover(seed, {
       params: { width, depth, count, biome, terrainSeed, terrainParams, treePositions, origin, areas, exclusions, avoidPaths },
       measurements: {
         clumps: renderedClumps,
-        grassClumps: renderedClumps - fernCount - shrubCount,
+        grassClumps: renderedClumps - fernCount - shrubCount - rosetteCount,
         fernClumps: fernCount,
         shrubClumps: shrubCount,
+        rosetteClumps: rosetteCount,
         foliageClumps,
         flowers: flowerCount,
         blades: bladeCount,

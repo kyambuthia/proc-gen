@@ -54,13 +54,20 @@ function valueNoise(x, z, seed) {
 export function sampleTerrainHeight(seed, x, z, { amplitude = 1, biome = "meadow" } = {}) {
   if (!Number.isFinite(x) || !Number.isFinite(z)) throw new TypeError("Terrain coordinates must be finite");
   const seedValue = hashSeed(seed);
-  const broad = (valueNoise(x * 0.031, z * 0.031, seedValue) - 0.5) * 4.8;
-  const hills = (valueNoise(x * 0.091, z * 0.091, seedValue ^ 0x6d2b79f5) - 0.5) * 1.2;
-  const detail = (valueNoise(x * 0.255, z * 0.255, seedValue ^ 0x1b873593) - 0.5) * 0.3;
-  const ridgeNoise = valueNoise(x * 0.047, z * 0.047, seedValue ^ 0x9e3779b9);
-  const ridge = Math.pow(1 - Math.abs(ridgeNoise * 2 - 1), 2) * (biome === "highland" ? 2.2 : 1.25);
+  const warpX = (valueNoise(x * 0.014, z * 0.014, seedValue ^ 0x2c1b3c6d) - 0.5) * 8;
+  const warpZ = (valueNoise(x * 0.014, z * 0.014, seedValue ^ 0x297a2d39) - 0.5) * 8;
+  const wx = x + warpX;
+  const wz = z + warpZ;
+  const broad = (valueNoise(wx * 0.026, wz * 0.026, seedValue) - 0.5) * 5.2;
+  const hills = (valueNoise(wx * 0.073, wz * 0.073, seedValue ^ 0x6d2b79f5) - 0.5) * 1.55;
+  const detail = (valueNoise(wx * 0.23, wz * 0.23, seedValue ^ 0x1b873593) - 0.5) * 0.26;
+  const ridgeNoise = valueNoise(wx * 0.043, wz * 0.043, seedValue ^ 0x9e3779b9);
+  const ridge = Math.pow(1 - Math.abs(ridgeNoise * 2 - 1), 2.3) * (biome === "highland" ? 2.0 : 0.78);
+  const drainageNoise = valueNoise(wx * 0.034, wz * 0.034, seedValue ^ 0x165667b1);
+  const channel = Math.pow(1 - Math.abs(drainageNoise * 2 - 1), 4);
+  const valley = channel * (biome === "highland" ? 0.72 : 0.34);
   const biomeScale = biome === "highland" ? 1.38 : 1;
-  return (broad + hills + detail + ridge - 0.28) * amplitude * biomeScale;
+  return (broad + hills + detail + ridge - valley - 0.28) * amplitude * biomeScale;
 }
 
 function faceNormal([a, b, c]) {
