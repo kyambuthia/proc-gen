@@ -58,8 +58,8 @@ in vec3 vLocal;
 in vec3 vWorld;
 flat in float vSurface;
 uniform vec3 uViewPosition;
-uniform float uTime;
-uniform vec2 uWindDirection;
+uniform highp float uTime;
+uniform highp vec2 uWindDirection;
 out vec4 outColor;
 
 float hashCell(vec3 p) {
@@ -76,7 +76,7 @@ void main() {
   float light = 0.58 + bands * 0.56;
 
   vec3 cells = floor(vLocal * vec3(5.0, 4.0, 5.0));
-  float patch = hashCell(cells) - 0.5;
+  float cellPigment = hashCell(cells) - 0.5;
   float stroke = sin(dot(vLocal, vec3(5.2, 2.3, 4.1)) + hashCell(cells + 7.0) * 5.0);
   vec3 viewDir = normalize(uViewPosition - vWorld);
   vec3 painted;
@@ -92,11 +92,11 @@ void main() {
     float brush = smoothstep(0.1, 0.94, ribbons * 0.42 + crossRipples * 0.34 + diffuse * 0.42);
     float glint = pow(max(dot(reflect(-normalize(vec3(-0.42, 0.82, 0.38)), n), viewDir), 0.0), 18.0);
     float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 2.0);
-    painted = waterColor * (0.78 + bands * 0.28) * (1.0 + patch * 0.08);
+    painted = waterColor * (0.78 + bands * 0.28) * (1.0 + cellPigment * 0.08);
     painted += vec3(0.19, 0.68, 0.72) * brush * 0.17;
     painted += vec3(0.76, 0.92, 0.8) * (glint * 0.44 + fresnel * 0.1);
   } else {
-    float pigment = 1.0 + patch * 0.15 + stroke * 0.035;
+    float pigment = 1.0 + cellPigment * 0.15 + stroke * 0.035;
     float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.0) * 0.12;
     vec3 warmLight = vec3(1.0, 0.74, 0.42) * rim;
     painted = vColor * light * pigment + warmLight;
