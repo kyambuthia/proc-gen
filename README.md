@@ -15,6 +15,13 @@ npm run verify     # tests, then a production build into dist/
 Add `?seed=1234` (any number or word) to the URL to play a generated arena; the same seed always
 gives the same layout. With no seed you get the hand-made classic arena.
 
+## Direct graphics foundation
+
+With the dev server running, open `/graphics-lab.html` for the first raw WebGL 2 / GLSL ES 3.00
+rendering slice. It builds a deterministic grove from seeded geometry, merges it with the ground,
+and shades it in one draw call without texture lookups. This is the target renderer for the
+procedural-world work; the existing playable scene is being migrated in stages.
+
 ## Controls
 
 | Key | Action |
