@@ -588,5 +588,10 @@ export function createBrain(self, world, { origin = [0, 0], role = "brawler", pe
   think.personality = p;
   think.memory = mem;
   think.info = { behaviour: "-", role: p.role };
+  think.dispose = () => {
+    off();
+    current?.exit();
+    current = null;
+  };
   return think;
 }

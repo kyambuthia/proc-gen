@@ -1,9 +1,17 @@
 import { createBrain } from "./ai.js";
 import { loadArena } from "./arena.js";
-import { nav } from "./nav.js";
+import { nav, rebuildNav } from "./nav.js";
 import { createWorld, RAGDOLL_FOOT_OFFSET } from "./physics.js";
 import { createWorldRenderer } from "./graphics/world-renderer.js";
 import { createWaveDirector } from "./waves.js";
+import {
+  createOsmObstacleBoxes,
+  createOsmScene,
+  fetchOsmData,
+  rebuildOsmScene,
+  serializeOsmScene,
+  validatePlayableOsmBounds,
+} from "./world/openstreetmap.js";
 
 const STEP = 1 / 60;
 const MAX_NPCS = 8;
@@ -125,6 +133,7 @@ export async function startGame() {
     shots: 0,
     event: "",
     best: 0,
+    osmScene: null,
   };
   const spawn = (at, opts) => {
     const character = world.spawnCharacter(at, opts);
@@ -157,6 +166,61 @@ export async function startGame() {
       world.removeCharacter(character);
     },
   });
+
+  function findMapSpawns() {
+    const open = [];
+    for (let z = -26; z <= 26; z += 1) {
+      for (let x = -26; x <= 26; x += 1) {
+        if (nav.walkable(x, z)) open.push([x, z]);
+      }
+    }
+    const occupied = [];
+    const take = (desired) => {
+      let best = null;
+      for (const point of open) {
+        if (occupied.some((other) => Math.hypot(point[0] - other[0], point[1] - other[1]) < 2.8)) continue;
+        const distance = Math.hypot(point[0] - desired[0], point[1] - desired[1]);
+        if (!best || distance < best.distance) best = { point, distance };
+      }
+      if (!best) throw new Error("This map patch has too little open ground for the player and four NPCs");
+      occupied.push(best.point);
+      return best.point;
+    };
+    return [take([0, 4]), ...NPC_SPAWNS.map(({ at }) => take(at))];
+  }
+
+  function activateOsmScene(scene) {
+    if (!Object.values(scene.meshes).some((chunks) => chunks.length)) {
+      throw new Error("This OSM scene has no supported roads, water, green space, or buildings");
+    }
+    const obstacles = createOsmObstacleBoxes(scene);
+    const previousObstacles = world.obstacles.map((obstacle) => ({ pos: [...obstacle.pos], half: [...obstacle.half] }));
+    let spawns;
+    try {
+      world.setObstacles(obstacles);
+      rebuildNav();
+      spawns = findMapSpawns();
+      renderer.setOsmScene(scene);
+    } catch (error) {
+      world.setObstacles(previousObstacles);
+      rebuildNav();
+      throw error;
+    }
+
+    game.waves.stop();
+    for (const character of [...world.characters]) world.removeCharacter(character);
+    game.npcs.length = 0;
+    game.hero = spawn([spawns[0][0], RAGDOLL_FOOT_OFFSET + 0.02, spawns[0][1]], { kind: "player", yaw: Math.PI });
+    game.npcs = NPC_SPAWNS.map(({ role }, index) => spawnNpc(role, spawns[index + 1]));
+    world.ball.reset([spawns[0][0] + 1.4, 0.6, spawns[0][1] + 1.4]);
+    game.osmScene = scene;
+    game.event = `Playing ${scene.spec.features.length} mapped features`;
+    game.accumulator = 0;
+    game.deadTimer = 0;
+    element("#map-credit").hidden = false;
+    element("#export-osm").disabled = false;
+    element("#osm-message").textContent = `Loaded ${scene.spec.features.length} features. ${obstacles.length} buildings block movement; NPCs use the updated navigation grid.`;
+  }
 
   const baseForPlayer = () => game.hero
     ? game.hero.state
@@ -270,6 +334,80 @@ export async function startGame() {
     const url = new URL(window.location.href);
     url.searchParams.set("seed", String(Math.floor(Math.random() * 1e9)));
     window.location.assign(url.toString());
+  }
+
+  const mapPanel = element("#osm-panel");
+  const mapToggle = element("#open-osm");
+  const mapMessage = element("#osm-message");
+  const fetchMapButton = element("#fetch-osm");
+  let osmRequestController = null;
+  const closeMapPanel = () => {
+    mapPanel.hidden = true;
+    mapToggle.setAttribute("aria-expanded", "false");
+  };
+  const onMapToggle = () => {
+    mapPanel.hidden = !mapPanel.hidden;
+    mapToggle.setAttribute("aria-expanded", String(!mapPanel.hidden));
+  };
+  async function onFetchOsm(event) {
+    event.preventDefault();
+    try {
+      const read = (id) => {
+        const value = element(id).value.trim();
+        if (!value) throw new Error("Enter all four latitude and longitude bounds first");
+        const number = Number(value);
+        if (!Number.isFinite(number)) throw new Error("Bounds must be finite numbers");
+        return number;
+      };
+      const bounds = validatePlayableOsmBounds([
+        read("#osm-south"), read("#osm-west"), read("#osm-north"), read("#osm-east"),
+      ]);
+      osmRequestController?.abort();
+      osmRequestController = new AbortController();
+      fetchMapButton.disabled = true;
+      mapMessage.textContent = "Requesting this small area from Overpass…";
+      const data = await fetchOsmData(bounds, { signal: osmRequestController.signal });
+      if (disposed || osmRequestController.signal.aborted) return;
+      const scene = createOsmScene(data, { bounds, seed: `${seed ?? "classic"}:osm` });
+      activateOsmScene(scene);
+    } catch (error) {
+      if (error?.name !== "AbortError") mapMessage.textContent = error?.message ?? String(error);
+    } finally {
+      fetchMapButton.disabled = false;
+      osmRequestController = null;
+    }
+  }
+
+  async function onOsmFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    osmRequestController?.abort();
+    if (file.size > 30_000_000) {
+      mapMessage.textContent = "Scene files must be smaller than 30 MB";
+      event.target.value = "";
+      return;
+    }
+    try {
+      mapMessage.textContent = `Reading ${file.name}…`;
+      const spec = JSON.parse(await file.text());
+      validatePlayableOsmBounds(spec?.bounds);
+      activateOsmScene(rebuildOsmScene(spec));
+    } catch (error) {
+      mapMessage.textContent = error?.message ?? String(error);
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  function exportOsmScene() {
+    if (!game.osmScene) return;
+    const blob = new Blob([serializeOsmScene(game.osmScene, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "proc-gen-osm-world.json";
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function onKeyDown(event) {
@@ -432,6 +570,11 @@ export async function startGame() {
   actions.addEventListener("click", onTouchActionClick);
   element("#pause-button").addEventListener("click", () => { game.paused = !game.paused; });
   element("#new-arena").addEventListener("click", newArena);
+  mapToggle.addEventListener("click", onMapToggle);
+  element("#close-osm").addEventListener("click", closeMapPanel);
+  element("#osm-form").addEventListener("submit", onFetchOsm);
+  element("#osm-file").addEventListener("change", onOsmFile);
+  element("#export-osm").addEventListener("click", exportOsmScene);
 
   let previous = 0;
   function updateHud(delta) {
@@ -443,7 +586,8 @@ export async function startGame() {
     const mode = hero ? `Active ragdoll · ${hero.state.mode}` : "No player";
     const hp = hero ? ` · ${Math.max(0, Math.round(hero.state.hp))} hp` : "";
     const wave = game.waves.active ? ` · Wave ${game.waves.wave || "ready"} · ${game.waves.enemiesLeft()} left · ${game.waves.score} score` : "";
-    status.textContent = `Arena ${seed ?? "classic"} · ${mode}${hp} · NPCs ${alive}/${game.npcs.length} · Hostile ${game.hostile || game.waves.active ? "on" : "off"}${wave}${game.event ? ` · ${game.event}` : ""}`;
+    const worldName = game.osmScene ? "OpenStreetMap patch" : `Arena ${seed ?? "classic"}`;
+    status.textContent = `${worldName} · ${mode}${hp} · NPCs ${alive}/${game.npcs.length} · Hostile ${game.hostile || game.waves.active ? "on" : "off"}${wave}${game.event ? ` · ${game.event}` : ""}`;
     const ball = world.ball.position();
     debug.textContent = `RAW WEBGL 2 · ${game.fps.toFixed(0)} fps · ${game.steps} physics steps · ${world.characters.length * 10 + 1} bodies\nBall ${Math.hypot(...world.ball.velocity()).toFixed(1)} m/s at y=${ball[1].toFixed(2)} · ${renderer.gl.getParameter(renderer.gl.MAX_VERTEX_ATTRIBS)} vertex attributes`;
     banner.textContent = game.paused ? "Paused · press P to resume" : game.waves.banner?.text ?? "";
@@ -488,6 +632,7 @@ export async function startGame() {
 
   return () => {
     disposed = true;
+    osmRequestController?.abort();
     cancelAnimationFrame(frameId);
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
@@ -506,6 +651,11 @@ export async function startGame() {
     stick.removeEventListener("pointercancel", clearStick);
     actions.removeEventListener("pointerdown", onTouchAction);
     actions.removeEventListener("click", onTouchActionClick);
+    mapToggle.removeEventListener("click", onMapToggle);
+    element("#close-osm").removeEventListener("click", closeMapPanel);
+    element("#osm-form").removeEventListener("submit", onFetchOsm);
+    element("#osm-file").removeEventListener("change", onOsmFile);
+    element("#export-osm").removeEventListener("click", exportOsmScene);
     renderer.dispose();
   };
 }

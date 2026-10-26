@@ -79,24 +79,29 @@ export function createNav(obstacles = OBSTACLES) {
   const cellOf = (x) => Math.floor((x + HALF) / CELL);
   const inGrid = (ix, iz) => ix >= 0 && iz >= 0 && ix < N && iz < N;
 
-  for (let iz = 0; iz < N; iz++) {
-    for (let ix = 0; ix < N; ix++) {
-      const x = cellX(ix);
-      const z = cellX(iz);
-      const i = ix + iz * N;
-      let h = 0;
-      for (const o of obstacles) {
-        const top = o.pos[1] + o.half[1];
-        const dx = Math.abs(x - o.pos[0]);
-        const dz = Math.abs(z - o.pos[2]);
-        if (dx < o.half[0] && dz < o.half[2]) h = Math.max(h, top);
+  // Rasterize only cells touched by each obstacle. The old cell × obstacle scan became costly
+  // for imported OSM blocks, where a small patch can contain hundreds of building footprints.
+  const rasterMargin = Math.max(CLEARANCE, FACE_MARGIN);
+  for (const obstacle of obstacles) {
+    const top = obstacle.pos[1] + obstacle.half[1];
+    const minX = Math.max(0, Math.floor((obstacle.pos[0] - obstacle.half[0] - rasterMargin + HALF) / CELL));
+    const maxX = Math.min(N - 1, Math.ceil((obstacle.pos[0] + obstacle.half[0] + rasterMargin + HALF) / CELL));
+    const minZ = Math.max(0, Math.floor((obstacle.pos[2] - obstacle.half[2] - rasterMargin + HALF) / CELL));
+    const maxZ = Math.min(N - 1, Math.ceil((obstacle.pos[2] + obstacle.half[2] + rasterMargin + HALF) / CELL));
+    for (let iz = minZ; iz <= maxZ; iz++) {
+      for (let ix = minX; ix <= maxX; ix++) {
+        const x = cellX(ix);
+        const z = cellX(iz);
+        const i = ix + iz * N;
+        const dx = Math.abs(x - obstacle.pos[0]);
+        const dz = Math.abs(z - obstacle.pos[2]);
+        if (dx < obstacle.half[0] && dz < obstacle.half[2]) height[i] = Math.max(height[i], top);
         if (top > MAX_JUMP_UP) {
-          if (dx < o.half[0] + CLEARANCE && dz < o.half[2] + CLEARANCE) blocked[i] = 1;
-        } else if (dx < o.half[0] + FACE_MARGIN && dz < o.half[2] + FACE_MARGIN && !(dx < o.half[0] && dz < o.half[2])) {
+          if (dx < obstacle.half[0] + CLEARANCE && dz < obstacle.half[2] + CLEARANCE) blocked[i] = 1;
+        } else if (dx < obstacle.half[0] + FACE_MARGIN && dz < obstacle.half[2] + FACE_MARGIN && !(dx < obstacle.half[0] && dz < obstacle.half[2])) {
           penalty[i] = Math.max(penalty[i], 1.5);
         }
       }
-      height[i] = h;
     }
   }
 

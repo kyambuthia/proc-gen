@@ -92,6 +92,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
 
   let lost = false;
   let decorations = null;
+  let osmMeshes = [];
   const onContextLost = (event) => {
     event.preventDefault();
     lost = true;
@@ -160,6 +161,24 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
     };
   }
 
+  function setOsmScene(scene) {
+    const nextMeshes = [];
+    try {
+      for (const chunks of Object.values(scene?.meshes ?? {})) {
+        for (const geometry of chunks) {
+          const mesh = uploadMesh(gl, geometry);
+          nextMeshes.push(mesh);
+          mesh.setInstances([{ matrix: transform4([0, 0, 0]), tint: WHITE }]);
+        }
+      }
+    } catch (error) {
+      for (const mesh of nextMeshes) mesh.dispose();
+      throw error;
+    }
+    for (const mesh of osmMeshes) mesh.dispose();
+    osmMeshes = nextMeshes;
+  }
+
   function render(world, game, now) {
     if (lost) return;
     resize();
@@ -172,11 +191,14 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
       if (!instances) groups.set(mesh, (instances = []));
       instances.push({ matrix, tint });
     };
+    const hasOsmScene = osmMeshes.length > 0;
 
     // Static scenery shares the same unit-box batch as ragdoll torsos.
-    for (const obstacle of world.obstacles) {
-      const tint = obstacle.half[1] > 1 ? [0.65, 0.45, 0.34] : [0.78, 0.58, 0.34];
-      add(box, transform4(obstacle.pos, [0, 0, 0, 1], obstacle.half.map((v) => v * 2)), tint);
+    if (!hasOsmScene) {
+      for (const obstacle of world.obstacles) {
+        const tint = obstacle.half[1] > 1 ? [0.65, 0.45, 0.34] : [0.78, 0.58, 0.34];
+        add(box, transform4(obstacle.pos, [0, 0, 0, 1], obstacle.half.map((v) => v * 2)), tint);
+      }
     }
 
     for (const character of world.characters) {
@@ -202,14 +224,16 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
     const ballPosition = world.ball.position();
     add(sphere, transform4(ballPosition, [0, 0, 0, 1], [world.ball.radius, world.ball.radius, world.ball.radius]), [0.96, 0.42, 0.17]);
     add(floor, transform4([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]), WHITE);
-    add(grove, transform4([25, 0, -19], [0, 0, 0, 1], [1, 1, 1]), WHITE);
-    add(grove, transform4([-25, 0, 19], [0, 1, 0, 0], [1, 1, 1]), WHITE);
-    add(rockField, transform4([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]), WHITE);
-    decorations ??= placeDecorations(world);
-    const yawRotation = (yaw) => [0, Math.sin(yaw * 0.5), 0, Math.cos(yaw * 0.5)];
-    add(gingerCat, transform4(decorations.ginger, yawRotation(-0.7), [1, 1, 1]), WHITE);
-    add(charcoalCat, transform4(decorations.charcoal, yawRotation(1.2), [1, 1, 1]), WHITE);
-    add(car, transform4(decorations.car, yawRotation(-0.45), [1, 1, 1]), WHITE);
+    if (!hasOsmScene) {
+      add(grove, transform4([25, 0, -19], [0, 0, 0, 1], [1, 1, 1]), WHITE);
+      add(grove, transform4([-25, 0, 19], [0, 1, 0, 0], [1, 1, 1]), WHITE);
+      add(rockField, transform4([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]), WHITE);
+      decorations ??= placeDecorations(world);
+      const yawRotation = (yaw) => [0, Math.sin(yaw * 0.5), 0, Math.cos(yaw * 0.5)];
+      add(gingerCat, transform4(decorations.ginger, yawRotation(-0.7), [1, 1, 1]), WHITE);
+      add(charcoalCat, transform4(decorations.charcoal, yawRotation(1.2), [1, 1, 1]), WHITE);
+      add(car, transform4(decorations.car, yawRotation(-0.45), [1, 1, 1]), WHITE);
+    }
 
     const hero = game.hero;
     const focus = hero ? hero.state.pos : game.player.read();
@@ -233,14 +257,19 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
       gl.bindVertexArray(mesh.vao);
       gl.drawElementsInstanced(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_SHORT, 0, mesh.instanceCount);
     }
+    for (const mesh of osmMeshes) {
+      gl.bindVertexArray(mesh.vao);
+      gl.drawElementsInstanced(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_SHORT, 0, mesh.instanceCount);
+    }
     gl.bindVertexArray(null);
   }
 
   function dispose() {
     canvas.removeEventListener("webglcontextlost", onContextLost);
     for (const mesh of shapes.values()) mesh.dispose();
+    for (const mesh of osmMeshes) mesh.dispose();
     gl.deleteProgram(program);
   }
 
-  return { gl, render, resize, dispose };
+  return { gl, render, resize, dispose, setOsmScene };
 }

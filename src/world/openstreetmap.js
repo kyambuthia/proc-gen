@@ -1,10 +1,15 @@
 import { MeshBuilder } from "../procedural/mesh-builder.js";
 import { createRng, hashSeed } from "../procedural/seed.js";
+import { createAsset } from "../procedural/assets.js";
 
 const METERS_PER_LATITUDE_DEGREE = 111132;
 const MAX_SCENE_VERTICES = 60000;
 const MAX_TOTAL_SCENE_VERTICES = 300000;
 const MAX_FEATURES = 2500;
+const MAX_BUILDING_COLLIDERS = 256;
+const MAX_PLAYABLE_EXTENT_METERS = 54;
+const MAX_PROCEDURAL_TREES = 32;
+const MESH_VERTEX_STRIDE = 10;
 const MAX_SOURCE_ELEMENTS = 30000;
 const MAX_SOURCE_COORDINATES = 300000;
 const MAX_POINTS_PER_WAY = 4096;
@@ -495,13 +500,78 @@ function compileMeshes(features, seed) {
   const greenery = features.filter((feature) => feature.kind === "green");
   const water = features.filter((feature) => feature.kind === "water");
   const buildings = features.filter((feature) => feature.kind === "building");
-  return {
+  const meshes = {
     roads: geometryChunks(roads, drawLineMesh, budget),
     waterways: geometryChunks(waterways, drawLineMesh, budget),
     greenery: geometryChunks(greenery, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget),
     water: geometryChunks(water, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget),
     buildings: geometryChunks(buildings, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget),
+    trees: [],
   };
+  if (!greenery.length || budget.vertices >= MAX_TOTAL_SCENE_VERTICES) return meshes;
+
+  const occupiedByBuildings = buildings.map((feature) => {
+    const xs = feature.polygon.map(([x]) => x);
+    const zs = feature.polygon.map(([, z]) => z);
+    return {
+      minX: Math.min(...xs) - 1.5,
+      maxX: Math.max(...xs) + 1.5,
+      minZ: Math.min(...zs) - 1.5,
+      maxZ: Math.max(...zs) + 1.5,
+    };
+  });
+  const wooded = greenery.filter((feature) =>
+    feature.tags.landuse === "forest" || feature.tags.landuse === "wood" || feature.tags.natural === "wood" ||
+    feature.tags.leisure === "park" || feature.tags.leisure === "garden" || feature.tags.landuse === "grass" || feature.tags.landuse === "meadow",
+  );
+  const mergedTrees = new MeshBuilder();
+  let treeCount = 0;
+  let treeBudgetFull = false;
+  for (const feature of wooded) {
+    const xs = feature.polygon.map(([x]) => x);
+    const zs = feature.polygon.map(([, z]) => z);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    const spacing = feature.tags.landuse === "forest" || feature.tags.landuse === "wood" || feature.tags.natural === "wood" ? 5.5 : 9;
+    const random = createRng(deriveFeatureSeed(seed, `tree-layout:${feature.id}`));
+    for (let z = minZ + spacing * 0.5; z < maxZ && treeCount < MAX_PROCEDURAL_TREES; z += spacing) {
+      for (let x = minX + spacing * 0.5; x < maxX && treeCount < MAX_PROCEDURAL_TREES; x += spacing) {
+        const point = [x + (random() - 0.5) * spacing * 0.55, z + (random() - 0.5) * spacing * 0.55];
+        if (!pointInPolygon(point, feature.polygon)) continue;
+        if (occupiedByBuildings.some((box) => point[0] >= box.minX && point[0] <= box.maxX && point[1] >= box.minZ && point[1] <= box.maxZ)) continue;
+        const tree = createAsset("tree", deriveFeatureSeed(seed, `tree:${feature.id}:${treeCount}`), { variant: "broadleaf" });
+        const vertices = tree.geometry.vertices.length / tree.geometry.stride;
+        if (budget.vertices + mergedTrees.vertices.length / MESH_VERTEX_STRIDE + vertices > MAX_TOTAL_SCENE_VERTICES) {
+          treeBudgetFull = true;
+          break;
+        }
+        mergedTrees.append(tree.geometry, [point[0], 0, point[1]], 0.68 + random() * 0.34);
+        treeCount++;
+      }
+      if (treeBudgetFull || budget.vertices + mergedTrees.vertices.length / MESH_VERTEX_STRIDE >= MAX_TOTAL_SCENE_VERTICES) break;
+    }
+    if (treeBudgetFull || treeCount >= MAX_PROCEDURAL_TREES || budget.vertices + mergedTrees.vertices.length / MESH_VERTEX_STRIDE >= MAX_TOTAL_SCENE_VERTICES) break;
+  }
+  if (treeCount) {
+    const geometry = mergedTrees.build();
+    budget.vertices += geometry.vertices.length / geometry.stride;
+    meshes.trees.push(geometry);
+  }
+  return meshes;
+}
+
+function pointInPolygon(point, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i];
+    const b = polygon[j];
+    const crosses = (a[1] > point[1]) !== (b[1] > point[1]) &&
+      point[0] < ((b[0] - a[0]) * (point[1] - a[1])) / (b[1] - a[1]) + a[0];
+    if (crosses) inside = !inside;
+  }
+  return inside;
 }
 
 function validateSceneSpec(spec) {
@@ -543,6 +613,41 @@ function validateSceneSpec(spec) {
     if (pointCount > MAX_SOURCE_COORDINATES) throw new RangeError(`OSM scene exceeds the ${MAX_SOURCE_COORDINATES} geometry point limit`);
   }
   return spec;
+}
+
+export function validatePlayableOsmBounds(bounds) {
+  const checked = validateOsmBounds(bounds, 0.02);
+  const [south, west, north, east] = checked;
+  const centerLatitude = ((south + north) * 0.5 * Math.PI) / 180;
+  const width = (east - west) * METERS_PER_LATITUDE_DEGREE * Math.cos(centerLatitude);
+  const depth = (north - south) * METERS_PER_LATITUDE_DEGREE;
+  if (width > MAX_PLAYABLE_EXTENT_METERS || depth > MAX_PLAYABLE_EXTENT_METERS) {
+    throw new RangeError(`Playable OSM bounds must fit within ${MAX_PLAYABLE_EXTENT_METERS} metres on each side`);
+  }
+  return checked;
+}
+
+export function createOsmObstacleBoxes(input) {
+  const spec = validateSceneSpec(input?.spec ?? input);
+  validatePlayableOsmBounds(spec.bounds);
+  const buildings = spec.features.filter((feature) => feature.kind === "building");
+  if (buildings.length > MAX_BUILDING_COLLIDERS) {
+    throw new RangeError(`Playable OSM scenes support at most ${MAX_BUILDING_COLLIDERS} building colliders; choose a smaller area`);
+  }
+  return buildings.map((feature) => {
+    const xs = feature.polygon.map(([x]) => x);
+    const zs = feature.polygon.map(([, z]) => z);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    const halfX = Math.max(0.25, (maxX - minX) * 0.5);
+    const halfZ = Math.max(0.25, (maxZ - minZ) * 0.5);
+    return {
+      pos: [(minX + maxX) * 0.5, feature.height * 0.5, (minZ + maxZ) * 0.5],
+      half: [halfX, feature.height * 0.5, halfZ],
+    };
+  });
 }
 
 export function createOsmScene(data, { bounds = null, seed = 0, maxFeatures = MAX_FEATURES } = {}) {

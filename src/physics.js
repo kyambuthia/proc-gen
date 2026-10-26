@@ -1,6 +1,6 @@
 import initJolt from "jolt-physics";
 import { createCharacter } from "./character.js";
-import { OBSTACLES } from "./scenery.js";
+import { OBSTACLES, setObstacles as replaceObstacles } from "./scenery.js";
 import { qRot, rayVsBox, rayVsCapsule, rayVsSphere } from "./math.js";
 
 const LAYER_STATIC = 0;
@@ -120,18 +120,21 @@ export async function createWorld() {
   );
   bodies.AddBody(floor.GetID(), Jolt.EActivation_DontActivate);
 
-  for (const o of OBSTACLES) {
-    const box = bodies.CreateBody(
+  const obstacleBodies = [];
+  const addObstacleBody = (obstacle) => {
+    const body = bodies.CreateBody(
       new Jolt.BodyCreationSettings(
-        new Jolt.BoxShape(vec(o.half)),
-        rvec(o.pos),
+        new Jolt.BoxShape(vec(obstacle.half)),
+        rvec(obstacle.pos),
         new Jolt.Quat(0, 0, 0, 1),
         Jolt.EMotionType_Static,
         LAYER_STATIC,
       ),
     );
-    bodies.AddBody(box.GetID(), Jolt.EActivation_DontActivate);
-  }
+    bodies.AddBody(body.GetID(), Jolt.EActivation_DontActivate);
+    return body;
+  };
+  for (const obstacle of OBSTACLES) obstacleBodies.push(addObstacleBody(obstacle));
 
   const ballSettings = new Jolt.BodyCreationSettings(
     new Jolt.SphereShape(BALL.radius),
@@ -392,6 +395,32 @@ export async function createWorld() {
 
   const world = { characters: [], ball, obstacles: OBSTACLES, ctx: { Jolt, bodies, physics } };
 
+  world.setObstacles = (list) => {
+    if (!Array.isArray(list) || list.length > 2048 || list.some((obstacle) =>
+      !obstacle || !Array.isArray(obstacle.pos) || obstacle.pos.length !== 3 || !obstacle.pos.every(Number.isFinite) ||
+      !Array.isArray(obstacle.half) || obstacle.half.length !== 3 || !obstacle.half.every((value) => Number.isFinite(value) && value > 0)
+    )) {
+      throw new TypeError("World obstacles must be a bounded list of finite 3D boxes");
+    }
+    const nextBodies = [];
+    try {
+      for (const obstacle of list) nextBodies.push(addObstacleBody(obstacle));
+    } catch (error) {
+      for (const body of nextBodies) {
+        bodies.RemoveBody(body.GetID());
+        bodies.DestroyBody(body.GetID());
+      }
+      throw error;
+    }
+    for (const body of obstacleBodies) {
+      bodies.RemoveBody(body.GetID());
+      bodies.DestroyBody(body.GetID());
+    }
+    obstacleBodies.length = 0;
+    obstacleBodies.push(...nextBodies);
+    replaceObstacles(list);
+  };
+
   // A tiny event bus: gunshots and hits are announced here so NPCs can hear and react to them.
   const listeners = new Set();
   world.on = (fn) => {
@@ -451,6 +480,7 @@ export async function createWorld() {
 
   function removeCharacter(character) {
     if (ball.holder === character) character.drop();
+    character.brain?.dispose?.();
     const i = world.characters.indexOf(character);
     if (i >= 0) world.characters.splice(i, 1);
     destroyRagdoll(character.ragdoll);

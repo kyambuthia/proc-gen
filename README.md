@@ -26,16 +26,17 @@ Procedural assets use a seeded registry: `createAsset(type, seed, params)` build
 serializable spec; `serializeAsset` and `rebuildAsset` save and restore that recipe without storing
 GPU buffers. Current types are `tree`, `grove`, `rock`, `rock-field`, `cat`, and `car`.
 
-The first OpenStreetMap adapter lives in `src/world/openstreetmap.js`. It can request a small
-Overpass bounding box or compile an Overpass JSON response into seeded road, waterway, water, green
-space, and simple building meshes. `createOsmScene` returns CPU mesh chunks ready for upload through
-the direct WebGL mesh path; `serializeOsmScene` stores portable feature data and required OpenStreetMap
-attribution without GPU geometry. The query is capped at 0.02 degrees per side, and import guards
-bound element, feature, coordinate, and total mesh vertex counts. The adapter currently reads way geometry, treats
-buildings as simple extrusions, and has no terrain elevation, relation multipolygons, or physics/nav
-conversion yet. Imported scenes are a data and mesh foundation; the active arena renderer does not
-load them into gameplay yet. Map data is © OpenStreetMap contributors under the ODbL; retain the
-attribution in any exported or displayed scene.
+The OpenStreetMap adapter in `src/world/openstreetmap.js` compiles bounded Overpass data into seeded
+road, river, water, green-space, and building meshes. Choose **Play an OSM patch** in the game to
+enter south/west/north/east bounds and fetch that place, or import/export a portable scene JSON file.
+Playable patches are limited to about 54 metres per side. Building footprints become conservative
+box colliders, mapped parks and woods receive seeded procedural trees, and NPC navigation is rebuilt
+for the imported block. All map geometry is uploaded through the direct WebGL 2 mesh path. The scene
+JSON keeps required OpenStreetMap attribution and omits GPU geometry. Playable scenes allow up to
+256 building colliders. Import guards bound element, feature, coordinate, collider, and total mesh
+vertex counts. Current map data reads ways only, uses simple building extrusions and box collision
+proxies, and has no terrain elevation, relation multipolygons, or water physics. Map attribution stays visible
+while the scene is loaded. Map data is © OpenStreetMap contributors under the ODbL.
 
 ## Controls
 
@@ -73,7 +74,7 @@ civilians run away.
 
 | File | What it does |
 | --- | --- |
-| `src/physics.js` | Jolt world: floor and scenery, ragdoll bodies and joints, the ball, ray casts, and an event bus (`shot`, `gunshot`, `hit`, `death`) |
+| `src/physics.js` | Jolt world: floor and replaceable scenery colliders, ragdoll bodies and joints, the ball, ray casts, and an event bus (`shot`, `gunshot`, `hit`, `death`) |
 | `src/character.js` | The active-ragdoll controller: joint motors, capture-point stepping with two-link leg IK, balance assists, knock-down and get-up, punch, kick, carry and throw, aim and shoot |
 | `src/ai.js` | NPC brains: perception (view cone, line of sight, hearing, memory) and utility-scored behaviours (wander, investigate, chase with flanking, flee, shoot, take cover) |
 | `src/nav.js` | Navigation grid with step, jump and drop moves; A* with string-pulling; reachability flood fill |
@@ -81,12 +82,12 @@ civilians run away.
 | `src/arena.js` | Seeded arena generator (walls, blocks, stairs, pillars), rejecting layouts with unreachable areas |
 | `src/scenery.js` | The live obstacle list and ground-height helpers |
 | `src/waves.js` | Wave survival director: rosters, spawning, scoring, medkits |
-| `src/raw-game.js` | Direct-render game loop, keyboard/touch controls, HUD, minimap, and combat |
-| `src/graphics/world-renderer.js` | Raw WebGL 2 batches for the playable scene |
+| `src/raw-game.js` | Direct-render game loop, keyboard/touch controls, OSM patch fetch/import/export, HUD, minimap, and combat |
+| `src/graphics/world-renderer.js` | Raw WebGL 2 batches for the playable scene and imported map chunks |
 | `src/graphics/webgl2.js` | Shader compilation, GPU buffers, and instanced mesh upload |
 | `src/procedural/mesh-builder.js` | CPU mesh construction for boxes, ellipsoids, capsules, and merged assets |
 | `src/procedural/assets.js` | Public registry and JSON import/export for generated asset recipes |
-| `src/world/openstreetmap.js` | Bounded Overpass requests, OSM way parsing, local projection, mesh compilation, and portable scene import/export |
+| `src/world/openstreetmap.js` | Bounded Overpass requests, OSM way parsing, mesh compilation, building colliders, and portable scene import/export |
 
 Each NPC brain returns the same `{ x, z, run, jump }` input the player produces, so a body does not
 know who is steering it. The game logic has no dependency on the renderer: the tests in `tests/`

@@ -32,9 +32,24 @@
       .brand span { display: block; margin-top: 3px; color: #bdc9c4; font-size: 11px; }
       .readout { max-width: min(760px, 65vw); padding: 10px 13px; border-radius: 10px; color: #e1e6dc; font-size: 12px; line-height: 1.5; text-align: right; }
       #status { color: #d9e2d8; }
-      .header-actions { display: flex; gap: 7px; justify-content: flex-end; margin-top: 6px; pointer-events: auto; }
+      .header-actions { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; margin-top: 6px; pointer-events: auto; }
       .small-button { border: 1px solid rgba(220,240,220,.2); border-radius: 999px; padding: 5px 10px; background: rgba(255,255,255,.07); cursor: pointer; font-size: 11px; }
       .small-button:hover { background: rgba(167,255,144,.15); border-color: rgba(167,255,144,.5); }
+      .osm-panel { position: fixed; z-index: 6; top: 112px; right: 16px; width: min(390px, calc(100vw - 32px)); max-height: calc(100dvh - 130px); overflow: auto; padding: 16px; border: 1px solid rgba(224,237,222,.2); border-radius: 14px; background: rgba(9,16,23,.94); box-shadow: 0 14px 42px rgba(0,0,0,.42); color: #e7eee4; font-size: 12px; line-height: 1.45; }
+      .osm-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .osm-panel-head strong { color: #a7ff90; letter-spacing: .11em; font-size: 11px; }
+      .osm-panel p { margin: 8px 0 12px; color: #bac8c0; }
+      .osm-bounds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .osm-bounds label { display: grid; gap: 4px; color: #c5d1c9; font-size: 10px; }
+      .osm-bounds input, .osm-file { width: 100%; min-height: 36px; border: 1px solid rgba(220,240,220,.2); border-radius: 8px; padding: 7px 9px; background: rgba(255,255,255,.07); color: #f5ffe9; font: inherit; }
+      .osm-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+      .osm-actions button { border: 1px solid rgba(220,240,220,.2); border-radius: 8px; padding: 8px 10px; background: rgba(255,255,255,.07); color: inherit; cursor: pointer; font: inherit; }
+      .osm-actions button.primary { border-color: rgba(167,255,144,.44); background: rgba(110,195,99,.2); }
+      .osm-actions button:disabled { opacity: .45; cursor: wait; }
+      .osm-divider { display: flex; align-items: center; gap: 8px; margin: 15px 0 9px; color: #94a69d; font-size: 10px; }
+      .osm-divider::before, .osm-divider::after { height: 1px; flex: 1; background: rgba(220,240,220,.14); content: ""; }
+      #osm-message { min-height: 18px; margin: 10px 0 0; color: #d6e5d7; overflow-wrap: anywhere; }
+      .map-credit { position: fixed; z-index: 3; right: 16px; bottom: 176px; padding: 5px 8px; border-radius: 7px; background: rgba(9,16,23,.82); color: #e7eee4; font-size: 10px; text-decoration: underline; text-underline-offset: 2px; }
       .map-frame { position: fixed; z-index: 2; right: 16px; bottom: 16px; padding: 5px; border-radius: 10px; pointer-events: none; }
       #minimap { display: block; width: 148px; height: 148px; border-radius: 6px; }
       .controls { position: fixed; z-index: 2; left: 16px; bottom: 16px; width: min(470px, calc(100vw - 200px)); padding: 11px 13px; border-radius: 10px; color: #d0d9d1; font-size: 11px; line-height: 1.55; pointer-events: none; }
@@ -54,6 +69,8 @@
         .brand strong { font-size: 11px; }
         .brand span { font-size: 9px; }
         .readout { max-width: 64vw; padding: 8px 9px; font-size: 10px; }
+        .osm-panel { top: 106px; right: 9px; width: min(370px, calc(100vw - 18px)); max-height: calc(100dvh - 120px); }
+        .map-credit { right: 9px; bottom: calc(246px + env(safe-area-inset-bottom)); }
         .map-frame { right: 9px; bottom: calc(138px + env(safe-area-inset-bottom)); padding: 4px; }
         #minimap { width: 94px; height: 94px; }
         .controls { display: none; }
@@ -75,11 +92,30 @@
         <div id="status">Preparing the world…</div>
         <div class="header-actions">
           <button class="small-button" id="pause-button" type="button">Pause · P</button>
+          <button class="small-button" id="open-osm" type="button" aria-expanded="false">Play an OSM patch</button>
           <button class="small-button" id="new-arena" type="button">New world · N</button>
         </div>
       </div>
     </header>
     <pre id="debug" class="debug">Starting direct WebGL renderer…</pre>
+    <section id="osm-panel" class="osm-panel" aria-label="OpenStreetMap world import" hidden>
+      <div class="osm-panel-head"><strong>PLAY A REAL PLACE</strong><button class="small-button" id="close-osm" type="button" aria-label="Close map panel">Close</button></div>
+      <p>Fetch a compact area for ragdolls and NPCs, or import a saved PROC/GEN OSM scene. Enter bounds in south, west, north, east order. A playable patch is limited to about 54 metres per side.</p>
+      <form id="osm-form">
+        <div class="osm-bounds">
+          <label>South latitude<input id="osm-south" type="number" step="any" inputmode="decimal" required /></label>
+          <label>West longitude<input id="osm-west" type="number" step="any" inputmode="decimal" required /></label>
+          <label>North latitude<input id="osm-north" type="number" step="any" inputmode="decimal" required /></label>
+          <label>East longitude<input id="osm-east" type="number" step="any" inputmode="decimal" required /></label>
+        </div>
+        <div class="osm-actions"><button class="primary" id="fetch-osm" type="submit">Fetch and play</button></div>
+      </form>
+      <div class="osm-divider">or import a saved scene</div>
+      <input id="osm-file" class="osm-file" type="file" accept="application/json,.json" aria-label="Import an OSM scene JSON file" />
+      <div class="osm-actions"><button id="export-osm" type="button" disabled>Save portable scene</button></div>
+      <p id="osm-message" role="status" aria-live="polite">Map requests only run when you press Fetch and play.</p>
+    </section>
+    <a id="map-credit" class="map-credit" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" hidden>© OpenStreetMap contributors</a>
     <div id="banner" hidden></div>
     <div class="crosshair" aria-hidden="true"></div>
     <div class="map-frame"><canvas id="minimap" width="168" height="168" aria-label="Arena map"></canvas></div>

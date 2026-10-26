@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createNav } from "../src/nav.js";
 import {
   createOsmScene,
+  createOsmObstacleBoxes,
   createOverpassQuery,
   fetchOsmData,
   rebuildOsmScene,
   serializeOsmScene,
   triangulateOsmPolygon,
   validateOsmBounds,
+  validatePlayableOsmBounds,
 } from "../src/world/openstreetmap.js";
 
 const bounds = [0, 0, 0.01, 0.01];
@@ -50,6 +53,8 @@ test("OSM bounds and Overpass queries stay deliberately small", () => {
   assert.match(query, /way\["highway"\]/);
   assert.match(query, /way\["building"\]/);
   assert.match(query, /out body geom/);
+  assert.deepEqual(validatePlayableOsmBounds([0.001, 0.001, 0.0014, 0.0014]), [0.001, 0.001, 0.0014, 0.0014]);
+  assert.throws(() => validatePlayableOsmBounds(bounds), /54 metres/);
 });
 
 test("Overpass fetch posts a bounded query and validates its response", async () => {
@@ -78,6 +83,7 @@ test("OSM ways become seeded, bounded meshes with portable attribution", () => {
   assert.equal(scene.spec.features.find((feature) => feature.kind === "building").height, 6.2);
   assert.ok(scene.meshes.roads.length > 0);
   assert.ok(scene.meshes.buildings.length > 0);
+  assert.ok(scene.meshes.trees.length > 0, "mapped park receives seeded procedural trees");
   let totalVertices = 0;
   for (const chunks of Object.values(scene.meshes)) {
     for (const mesh of chunks) {
@@ -119,4 +125,20 @@ test("concave OSM polygons triangulate to the same area in either winding", () =
   const polygonArea = 7;
   assert.ok(Math.abs(triangles.reduce((sum, triangle) => sum + triangleArea(triangle), 0) - polygonArea) < 1e-8);
   assert.ok(Math.abs(reverseTriangles.reduce((sum, triangle) => sum + triangleArea(triangle), 0) - polygonArea) < 1e-8);
+});
+
+test("small OSM scenes produce bounded building colliders for play", () => {
+  const bounds = [0.001, 0.001, 0.0014, 0.0014];
+  const data = { elements: [way(77, { building: "yes", height: "8" }, [
+    [0.0011, 0.0011], [0.0011, 0.0013], [0.0013, 0.0013], [0.0013, 0.0011], [0.0011, 0.0011],
+  ])] };
+  const scene = createOsmScene(data, { bounds, seed: 8 });
+  const obstacles = createOsmObstacleBoxes(scene);
+  assert.equal(obstacles.length, 1);
+  assert.ok(obstacles[0].half[1] === 4);
+  assert.ok(obstacles[0].half[0] > 0 && obstacles[0].half[2] > 0);
+  const navigation = createNav(obstacles);
+  assert.equal(navigation.walkable(0, 0), false);
+  assert.equal(navigation.findPath(-15, 0, 15, 0).partial, false);
+  assert.throws(() => createOsmObstacleBoxes(createOsmScene(sampleResponse(), { bounds: [0, 0, 0.01, 0.01], seed: 8 })), /54 metres/);
 });
