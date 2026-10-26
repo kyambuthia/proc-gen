@@ -8,6 +8,7 @@ import {
   listAssetTypes,
   rebuildAsset,
   rebuildAssetFromGlb,
+  sampleTerrainHeight,
   serializeAsset,
 } from "../src/procedural/assets.js";
 
@@ -25,7 +26,7 @@ const hasUnitNormals = (geometry) => {
 };
 
 test("built-in generators produce repeatable geometry from a type and seed", () => {
-  assert.deepEqual(listAssetTypes(), ["bicycle", "car", "cat", "grove", "human", "rat", "rock", "rock-field", "tree", "water"]);
+  assert.deepEqual(listAssetTypes(), ["bicycle", "car", "cat", "groundcover", "grove", "human", "rat", "rock", "rock-field", "terrain", "tree", "water"]);
   for (const [type, params] of [
     ["bicycle", { style: "mountain", paint: "coral", size: 1.1 }],
     ["car", { paint: "coral", size: 1.1 }],
@@ -34,8 +35,10 @@ test("built-in generators produce repeatable geometry from a type and seed", () 
     ["rat", { coat: "russet", size: 0.8 }],
     ["tree", { variant: "broadleaf" }],
     ["grove", { count: 5 }],
+    ["groundcover", { count: 100, width: 12, depth: 10, biome: "meadow" }],
     ["rock", { variant: "ochre", size: 1.25 }],
     ["rock-field", { count: 12, innerRadius: 20, outerRadius: 27 }],
+    ["terrain", { width: 12, depth: 10, resolution: 18 }],
     ["water", { shape: "river", width: 5, depth: 20, palette: "tropical" }],
   ]) {
     const first = createAsset(type, "painterly-path", params);
@@ -48,6 +51,50 @@ test("built-in generators produce repeatable geometry from a type and seed", () 
     assert.deepEqual(rebuilt.spec, first.spec, `${type} spec changed after import`);
     assert.deepEqual(arrays(rebuilt), arrays(first), `${type} geometry changed after import`);
   }
+});
+
+test("tree species have distinct portable silhouettes and a naturally spaced grove", () => {
+  const species = ["broadleaf", "sakura", "red-maple", "evergreen", "willow", "ginkgo"];
+  const trees = species.map((variant) => createAsset("tree", "tree-variation", { variant }));
+  assert.deepEqual(trees.map((tree) => tree.spec.params.variant), species);
+  assert.equal(new Set(trees.map((tree) => Array.from(tree.geometry.vertices).join(","))).size, species.length, "each species should produce a distinct mesh silhouette");
+  for (const tree of trees) assert.ok(hasUnitNormals(tree.geometry), `${tree.spec.params.variant} normals should be finite and unit length`);
+
+  const terrain = createAsset("terrain", "natural-grove-terrain", { width: 26, depth: 24, resolution: 30, biome: "meadow" });
+  const grove = createAsset("grove", "natural-grove-layout", {
+    count: 22,
+    width: 24,
+    depth: 22,
+    terrainSeed: terrain.spec.seed,
+    terrainParams: terrain.spec.params,
+  });
+  assert.equal(grove.spec.children.length, 22);
+  assert.ok(new Set(grove.spec.children.map((tree) => tree.params.variant)).size >= 3);
+  for (const tree of grove.spec.children) {
+    const [x, y, z] = tree.position;
+    const expectedY = sampleTerrainHeight(terrain.spec.seed, x, z, terrain.spec.params);
+    assert.ok(Math.abs(y - expectedY) < 1e-5, "grove trunks should follow the seeded terrain surface");
+  }
+  for (let i = 0; i < grove.spec.children.length; i++) {
+    const [x, , z] = grove.spec.children[i].position;
+    for (let j = i + 1; j < grove.spec.children.length; j++) {
+      const [otherX, , otherZ] = grove.spec.children[j].position;
+      assert.ok(Math.hypot(x - otherX, z - otherZ) > 1.7, "tree trunks should have natural clearance");
+    }
+  }
+
+  const groundcover = createAsset("groundcover", "natural-grove-floor", {
+    width: 24,
+    depth: 22,
+    count: 180,
+    biome: "forest",
+    terrainSeed: terrain.spec.seed,
+    terrainParams: terrain.spec.params,
+    treePositions: grove.spec.children.map((tree) => [tree.position[0], tree.position[1], tree.position[2], 0.5]),
+  });
+  assert.equal(groundcover.spec.measurements.clumps, 180);
+  assert.ok(groundcover.spec.measurements.flowers > 0);
+  assert.ok(groundcover.geometry.indices.length > 3000);
 });
 
 test("water assets carry a shader surface id and a portable wave recipe", () => {

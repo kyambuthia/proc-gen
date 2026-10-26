@@ -4,11 +4,11 @@
 
 The browser renderer uses the WebGL 2 API and GLSL ES 3.00 directly. WebGL 2 exposes much of OpenGL ES 3.0, which is the shared browser target for desktop and mobile. Rendering and the playable page do not depend on Three.js, React Three Fiber, or a scene graph.
 
-The first vertical slice is available at `/graphics-lab.html`: deterministic tree geometry, a merged ground-and-grove mesh, a compact painterly shader, and direct GPU buffer/program management. `/asset-lab.html` is the asset foundry for building any registered asset from a seed, inspecting its motion and collision recipe, and importing or exporting portable JSON and GLB. Both use the same direct WebGL 2 renderer. The playable page uses it with instanced meshes for ragdoll bodies and scenery. It uses no textures.
+The first vertical slice is available at `/graphics-lab.html`: deterministic tree geometry, a merged ground-and-grove mesh, a compact painterly shader, and direct GPU buffer/program management. `/asset-lab.html` builds registered assets from seeds, shows motion and collision recipes, and imports or exports portable JSON and GLB. `/landscape-lab.html` previews rolling low-poly terrain, six distinct tree silhouettes, and wind-touched grass and flowers in three WebGL draws. These pages share the same direct WebGL 2 renderer. The playable page uses it with instanced meshes for ragdoll bodies and scenery. It uses no textures.
 
 ## Asset contract
 
-An asset is described by a serializable specification containing its type, schema version, seed, parameters, motion profile, and simplified collider. `src/procedural/assets.js` exposes a registry that creates, serializes, imports, and rebuilds specs. Registered families include broadleaf trees, tree groves, faceted rocks, decorative rock fields, a tail-swaying cat, and a low-poly car with wheel and steering metadata. Geometry is derived from the spec, so exported JSON stays small and portable. Visual detail and collision detail stay separate.
+An asset is described by a serializable specification containing its type, schema version, seed, parameters, motion profile, and simplified collider. `src/procedural/assets.js` exposes a registry that creates, serializes, imports, and rebuilds specs. Registered families include six stylized tree species, terrain, clustered groundcover, groves, faceted rocks, decorative rock fields, a tail-swaying cat, and vehicles with wheel and steering metadata. Geometry is derived from the spec, so exported JSON stays portable. Visual detail and collision detail stay separate.
 
 The cat tail currently uses the shared wind displacement in the vertex shader. The car is a static scene prop for now; its wheel layout, steering axis, and collider spec are ready for the vehicle physics controller increment.
 
@@ -25,7 +25,7 @@ Physics remains independent of rendering. Asset definitions provide simplified c
 ## Build sequence
 
 1. Raw WebGL 2 setup, shader diagnostics, deterministic mesh generation, and tree wind prototype.
-2. Reusable primitive library and asset registry; add rocks, grass, and water with budget profiles.
+2. Reusable primitive library and asset registry; add varied trees, rolling terrain, clustered groundcover, rocks, and water with budget profiles.
 3. Procedural rigs and motion definitions for people and animals; Jolt collider profiles.
 4. Vehicle generators and wheel/steering motion.
 5. Expand procedural rigs, actors, props, and environment motion while preserving low-end GPU budgets.

@@ -1,5 +1,7 @@
 // Importing this module installs the built-in generators into the registry.
 import "./tree.js";
+import "./terrain.js";
+import "./groundcover.js";
 import "./rock.js";
 import "./cat.js";
 import "./car.js";
@@ -17,6 +19,8 @@ export {
   serializeAsset,
 } from "./asset-registry.js";
 export { createGrove, createTree } from "./tree.js";
+export { createTerrain, sampleTerrainHeight } from "./terrain.js";
+export { createGroundcover } from "./groundcover.js";
 export { createRock, createRockField } from "./rock.js";
 export { createCat } from "./cat.js";
 export { createCar } from "./car.js";
