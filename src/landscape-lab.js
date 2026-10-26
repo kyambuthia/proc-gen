@@ -23,6 +23,12 @@ const TREE_COLORS = {
   evergreen: "#238b78",
   willow: "#b9c963",
   ginkgo: "#f4c94f",
+  birch: "#73bd74",
+  flame: "#ff7956",
+  wisteria: "#b589df",
+  bamboo: "#59ae58",
+  "cloud-pine": "#348c88",
+  cypress: "#557f74",
 };
 const TREE_COUNT = 36;
 const GROUND_COVER_COUNT = 680;
@@ -116,7 +122,7 @@ function syncStats(terrain, grove, groundcover) {
     + groundcover.geometry.vertices.byteLength + groundcover.geometry.indices.byteLength;
   document.querySelector("#terrain-stat").textContent = `${terrain.spec.params.width} × ${terrain.spec.params.depth} m · ${terrain.spec.measurements.minHeight.toFixed(1)} to ${terrain.spec.measurements.maxHeight.toFixed(1)} m`;
   document.querySelector("#tree-stat").textContent = `${grove.spec.children.length} trees · terrain-following trunks`;
-  document.querySelector("#cover-stat").textContent = `${groundcover.spec.measurements.clumps} clumps · ${groundcover.spec.measurements.flowers} small blooms`;
+  document.querySelector("#cover-stat").textContent = `${groundcover.spec.measurements.clumps} clumps · ${groundcover.spec.measurements.fernClumps} ferns · ${groundcover.spec.measurements.shrubClumps} shrubs · ${groundcover.spec.measurements.flowers} blooms`;
   document.querySelector("#gpu-stat").textContent = `${vertices.toLocaleString()} verts · ${triangles.toLocaleString()} tris · ${(bytes / 1024).toFixed(0)} KiB · 3 draws`;
 
   const species = new Map();

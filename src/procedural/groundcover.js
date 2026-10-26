@@ -44,6 +44,39 @@ function addBlade(mesh, base, angle, height, width, baseColor, tipColor, wind) {
   mesh.triangle(back, back + 1, back + 2);
 }
 
+function addLeaf(mesh, base, tip, width, color, wind = 0.7) {
+  const direction = [tip[0] - base[0], tip[1] - base[1], tip[2] - base[2]];
+  const side = [-direction[2], 0, direction[0]];
+  const sideLength = Math.hypot(side[0], side[2]) || 1;
+  side[0] = (side[0] / sideLength) * width;
+  side[2] = (side[2] / sideLength) * width;
+  const middle = [
+    base[0] + direction[0] * 0.48,
+    base[1] + direction[1] * 0.48 + 0.025,
+    base[2] + direction[2] * 0.48,
+  ];
+  const left = [middle[0] - side[0], middle[1], middle[2] - side[2]];
+  const right = [middle[0] + side[0], middle[1], middle[2] + side[2]];
+  const lighter = color.map((channel, i) => Math.min(1, channel * (i === 1 ? 1.2 : 1.1) + 0.025));
+  const emit = (a, b, c, reverse = false) => {
+    if (reverse) [b, c] = [c, b];
+    const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const normal = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
+    const length = Math.hypot(...normal) || 1;
+    for (let i = 0; i < 3; i++) normal[i] /= length;
+    const first = mesh.vertices.length / VERTEX_STRIDE;
+    mesh.vertex(a, normal, color, wind * 0.15);
+    mesh.vertex(b, normal, lighter, wind * 0.55);
+    mesh.vertex(c, normal, lighter, wind);
+    mesh.triangle(first, first + 1, first + 2);
+  };
+  emit(base, left, tip);
+  emit(base, tip, right);
+  emit(base, left, tip, true);
+  emit(base, tip, right, true);
+}
+
 function gaussian(rng) {
   return Math.sqrt(-2 * Math.log(Math.max(0.00001, rng()))) * Math.cos(rng() * Math.PI * 2);
 }
@@ -152,46 +185,141 @@ export function createGroundcover(seed, {
       if (!point || positions.some((other) => Math.hypot(point.x - other.x, point.z - other.z) < minSpacing) ||
           avoid.some((tree) => Math.hypot(point.x - tree.x, point.z - tree.z) < (tree.radius ?? 0.65))) break;
     }
-    point.y = terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, point.x, point.z, terrainParams);
     positions.push(point);
   }
 
   const mesh = new MeshBuilder();
   const palette = PALETTES[biome];
   let flowerCount = 0;
+  let fernCount = 0;
+  let shrubCount = 0;
+  let bladeCount = 0;
+  let leafCount = 0;
+  let foliageClumps = 0;
+  let renderedClumps = 0;
   for (const point of positions) {
-    const blades = 4 + Math.floor(rng() * 3);
+    const vertexStart = mesh.vertices.length;
+    const indexStart = mesh.indices.length;
+    const countsBefore = [flowerCount, fernCount, shrubCount, bladeCount, leafCount, foliageClumps];
+    const blades = 3 + Math.floor(rng() * 3);
     const clumpRadius = 0.2 + rng() * 0.22;
+    const foliageKind = rng();
+    const hasFern = foliageKind < (biome === "forest" ? 0.2 : 0.11);
+    const hasShrub = !hasFern && foliageKind < (biome === "forest" ? 0.34 : 0.23);
     for (let blade = 0; blade < blades; blade++) {
       const angle = (blade / blades) * Math.PI * 2 + rng() * 0.7;
       const radial = clumpRadius * (0.15 + rng() * 0.8);
-      const base = [point.x + Math.cos(angle) * radial, point.y, point.z + Math.sin(angle) * radial];
+      const x = point.x + Math.cos(angle) * radial;
+      const z = point.z + Math.sin(angle) * radial;
+      const y = terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, x, z, terrainParams);
+      const base = [x, y, z];
       const heightScale = biome === "forest" ? 0.76 : 1;
       const height = (0.38 + rng() * 0.5) * heightScale;
       const baseColor = choose(rng, palette.grass);
       const tipColor = baseColor.map((channel, i) => Math.min(1, channel * (i === 1 ? 1.28 : 1.12) + (i === 1 ? 0.035 : 0.012)));
       addBlade(mesh, base, angle + rng() * 0.7, height, 0.055 + rng() * 0.045, baseColor, tipColor, 0.9);
+      bladeCount++;
     }
-    if (rng() < (biome === "forest" ? 0.045 : 0.11)) {
+
+    if (hasFern) {
+      fernCount++;
+      foliageClumps++;
+      const angle = rng() * Math.PI * 2;
+      const length = 0.38 + rng() * 0.18;
+      const tipX = point.x + Math.cos(angle) * length;
+      const tipZ = point.z + Math.sin(angle) * length;
+      const tipY = (terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, tipX, tipZ, terrainParams)) + 0.34 + rng() * 0.15;
+      const baseY = terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, point.x, point.z, terrainParams);
+      const stemBase = [point.x, baseY + 0.07, point.z];
+      const stemTip = [tipX, tipY, tipZ];
+      addLeaf(mesh, stemBase, stemTip, 0.035, choose(rng, palette.grass), 0.9);
+      leafCount++;
+      const sideAngle = angle + Math.PI * 0.5;
+      for (const t of [0.38, 0.66]) {
+        const centerX = point.x + Math.cos(angle) * length * t;
+        const centerZ = point.z + Math.sin(angle) * length * t;
+        const centerY = baseY + 0.07 + (tipY - baseY - 0.07) * t;
+        for (const sign of [-1, 1]) {
+          const leafletLength = 0.15 + rng() * 0.1;
+          const leafAngle = sideAngle + (sign < 0 ? Math.PI : 0);
+          const leafX = centerX + Math.cos(leafAngle) * leafletLength;
+          const leafZ = centerZ + Math.sin(leafAngle) * leafletLength;
+          const leafY = (terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, leafX, leafZ, terrainParams)) + centerY - baseY + 0.06;
+          addLeaf(mesh, [centerX, centerY, centerZ], [leafX, leafY, leafZ], 0.055, choose(rng, palette.grass), 0.88);
+          leafCount++;
+        }
+      }
+    } else if (hasShrub) {
+      shrubCount++;
+      foliageClumps++;
+      const shrubColors = biome === "autumn"
+        ? [[0.47, 0.5, 0.16], [0.63, 0.39, 0.15], [0.72, 0.49, 0.18]]
+        : biome === "forest"
+          ? [[0.08, 0.28, 0.16], [0.13, 0.39, 0.21], [0.21, 0.46, 0.25]]
+          : [[0.13, 0.39, 0.19], [0.25, 0.52, 0.21], [0.38, 0.58, 0.23]];
+      const lobes = 2 + Math.floor(rng() * 2);
+      for (let lobe = 0; lobe < lobes; lobe++) {
+        const angle = (lobe / lobes) * Math.PI * 2 + rng() * 0.6;
+        const radius = 0.1 + rng() * 0.13;
+        const x = point.x + Math.cos(angle) * radius;
+        const z = point.z + Math.sin(angle) * radius;
+        const y = (terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, x, z, terrainParams)) + 0.14 + rng() * 0.11;
+        mesh.addEllipsoid([x, y, z], [0.18 + rng() * 0.08, 0.15 + rng() * 0.06, 0.18 + rng() * 0.08], choose(rng, shrubColors), 5, 2, 0.35);
+      }
+      leafCount += lobes;
+    }
+
+    if (rng() < (biome === "forest" ? 0.045 : 0.085)) {
       const flower = choose(rng, palette.flower);
       const size = biome === "forest" ? 0.075 : 0.1;
-      mesh.addEllipsoid([point.x, point.y + 0.2, point.z], [size, size * 0.82, size], flower, 5, 3, 0.85);
+      const flowerY = (terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, point.x, point.z, terrainParams)) + 0.2;
+      for (let petal = 0; petal < 4; petal++) {
+        const angle = (petal / 4) * Math.PI * 2;
+        mesh.addEllipsoid([point.x + Math.cos(angle) * size * 0.55, flowerY, point.z + Math.sin(angle) * size * 0.55], [size * 0.7, size * 0.38, size * 0.55], flower, 4, 2, 0.85);
+      }
+      mesh.addEllipsoid([point.x, flowerY + size * 0.2, point.z], [size * 0.38, size * 0.32, size * 0.38], [1, 0.84, 0.35], 4, 2, 0.7);
       flowerCount++;
     }
+
+    if (mesh.vertices.length / VERTEX_STRIDE > 65535) {
+      mesh.vertices.length = vertexStart;
+      mesh.indices.length = indexStart;
+      [flowerCount, fernCount, shrubCount, bladeCount, leafCount, foliageClumps] = countsBefore;
+      break;
+    }
+    renderedClumps++;
   }
 
   const geometry = mesh.build();
+  const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+  for (let i = 0; i < geometry.vertices.length; i += VERTEX_STRIDE) {
+    for (let axis = 0; axis < 3; axis++) {
+      bounds.min[axis] = Math.min(bounds.min[axis], geometry.vertices[i + axis]);
+      bounds.max[axis] = Math.max(bounds.max[axis], geometry.vertices[i + axis]);
+    }
+  }
+  if (!renderedClumps) bounds.min = bounds.max = [origin[0], 0, origin[1]];
   return {
     spec: {
       type: "groundcover",
       version: 1,
       seed: seedValue,
       params: { width, depth, count, biome, terrainSeed, terrainParams, treePositions, origin, areas, exclusions, avoidPaths },
-      measurements: { clumps: positions.length, flowers: flowerCount, bladesApprox: positions.length * 5 },
+      measurements: {
+        clumps: renderedClumps,
+        grassClumps: renderedClumps - fernCount - shrubCount,
+        fernClumps: fernCount,
+        shrubClumps: shrubCount,
+        foliageClumps,
+        flowers: flowerCount,
+        blades: bladeCount,
+        bladesApprox: bladeCount,
+        leaves: leafCount,
+      },
       motion: { kind: "wind", frequency: 2.1, amplitude: 0.16 },
       collider: { kind: "none" },
     },
-    bounds: { min: [origin[0] - width * 0.5, -0.02, origin[1] - depth * 0.5], max: [origin[0] + width * 0.5, 0.95, origin[1] + depth * 0.5] },
+    bounds,
     geometry,
   };
 }

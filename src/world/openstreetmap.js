@@ -24,6 +24,7 @@ const LICENSE = "ODbL-1.0";
 
 const pointDistanceSquared = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
 const cross2 = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+const gaussian = (random) => Math.sqrt(-2 * Math.log(Math.max(0.00001, random()))) * Math.cos(random() * Math.PI * 2);
 
 export function validateOsmBounds(bounds, maxSpanDegrees = 0.25) {
   if (!Array.isArray(bounds) || bounds.length !== 4 || !bounds.every(Number.isFinite)) {
@@ -563,15 +564,30 @@ function compileMeshes(features, seed) {
     const target = Math.min(MAX_PROCEDURAL_TREES - treeCount, Math.max(area > spacing * spacing * 0.55 ? 1 : 0, Math.floor(area / (spacing * spacing))));
     if (target <= 0) continue;
     const random = createRng(deriveFeatureSeed(seed, `tree-layout:${feature.id}`));
-    const dominantSpecies = TREE_VARIANTS[Math.floor(random() * TREE_VARIANTS.length)];
+    const patchCount = Math.max(1, Math.min(8, Math.ceil(target / 4)));
+    const patchSpread = Math.min(maxX - minX, maxZ - minZ) / Math.sqrt(patchCount) * 0.34;
+    const patches = [];
+    for (let patch = 0; patch < patchCount; patch++) {
+      for (let attempt = 0; attempt < 80; attempt++) {
+        const center = [minX + random() * (maxX - minX), minZ + random() * (maxZ - minZ)];
+        if (!pointInPolygon(center, feature.polygon) || pointNearPaths(center, nearbyRoads, 1.3)) continue;
+        if (occupiedByBuildings.some((box) => center[0] >= box.minX && center[0] <= box.maxX && center[1] >= box.minZ && center[1] <= box.maxZ)) continue;
+        patches.push({ center, variant: TREE_VARIANTS[Math.floor(random() * TREE_VARIANTS.length)] });
+        break;
+      }
+    }
+    if (!patches.length) continue;
     let placedInFeature = 0;
     for (let attempt = 0; attempt < target * 100 && placedInFeature < target && treeCount < MAX_PROCEDURAL_TREES; attempt++) {
-      const point = [minX + random() * (maxX - minX), minZ + random() * (maxZ - minZ)];
+      const patch = patches[placedInFeature < patches.length ? placedInFeature : Math.floor(random() * patches.length)];
+      const point = random() < 0.18
+        ? [minX + random() * (maxX - minX), minZ + random() * (maxZ - minZ)]
+        : [patch.center[0] + gaussian(random) * patchSpread, patch.center[1] + gaussian(random) * patchSpread];
       if (!pointInPolygon(point, feature.polygon)) continue;
       if (occupiedByBuildings.some((box) => point[0] >= box.minX && point[0] <= box.maxX && point[1] >= box.minZ && point[1] <= box.maxZ)) continue;
       if (pointNearPaths(point, nearbyRoads, 1.3)) continue;
-      if (treeLocations.some((other) => pointDistanceSquared(point, other) < (spacing * 0.68) ** 2)) continue;
-      const variant = random() < 0.68 ? dominantSpecies : TREE_VARIANTS[Math.floor(random() * TREE_VARIANTS.length)];
+      if (treeLocations.some((other) => pointDistanceSquared(point, other) < (spacing * 0.62) ** 2)) continue;
+      const variant = random() < 0.72 ? patch.variant : TREE_VARIANTS[Math.floor(random() * TREE_VARIANTS.length)];
       const tree = createAsset("tree", deriveFeatureSeed(seed, `tree:${feature.id}:${treeCount}`), { variant });
       const vertices = tree.geometry.vertices.length / tree.geometry.stride;
       if (budget.vertices + mergedTrees.vertices.length / MESH_VERTEX_STRIDE + vertices > MAX_TOTAL_SCENE_VERTICES) {
@@ -579,7 +595,7 @@ function compileMeshes(features, seed) {
         break;
       }
       const angle = random() * Math.PI * 2;
-      const scale = 0.68 + random() * 0.34;
+      const scale = 0.58 + random() * 0.52;
       appendRotated(mergedTrees, tree.geometry, [point[0], 0, point[1]], angle, scale);
       treeLocations.push(point);
       treeCount++;
@@ -608,7 +624,7 @@ function compileMeshes(features, seed) {
     const area = Math.abs(signedArea(feature.polygon));
     const forest = feature.tags.landuse === "forest" || feature.tags.landuse === "wood" || feature.tags.natural === "wood";
     const requested = Math.min(360, Math.max(8, Math.floor(area * (forest ? 0.15 : 0.23))));
-    const budgeted = Math.max(0, Math.floor((MAX_TOTAL_SCENE_VERTICES - budget.vertices) / 42));
+    const budgeted = Math.max(0, Math.floor((MAX_TOTAL_SCENE_VERTICES - budget.vertices) / 56));
     const count = Math.min(requested, remainingClumps, budgeted);
     if (!count) return;
     const bounds = { minX: minX - 2, maxX: maxX + 2, minZ: minZ - 2, maxZ: maxZ + 2 };
