@@ -22,6 +22,10 @@ ragdoll parts and scenery as instanced meshes; the lab builds a deterministic gr
 as a single merged draw. Neither path uses a scene graph or texture lookups. The target is desktop and
 mobile hardware with OpenGL ES 3.0 class support.
 
+Open `/landscape-lab.html` for the seeded terrain and vegetation preview: rolling ridges and drainage,
+24 stylized anime trees, and low-poly grass, ferns, shrubs, flowers, and leaf litter. The terrain and
+ground cover stay within four draws and avoid texture sampling.
+
 Procedural assets use a seeded registry: `createAsset(type, seed, params)` builds geometry and a
 serializable spec; `serializeAsset` and `rebuildAsset` save and restore that recipe without storing
 GPU buffers. `exportAssetGlb` writes standard GLB 2.0 geometry with vertex pigments, procedural

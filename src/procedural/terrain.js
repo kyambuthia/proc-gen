@@ -8,6 +8,7 @@ const BIOMES = {
     grass: [0.32, 0.49, 0.23],
     upland: [0.54, 0.48, 0.28],
     rock: [0.38, 0.4, 0.38],
+    soil: [0.42, 0.31, 0.21],
     snow: [0.84, 0.86, 0.74],
   },
   autumn: {
@@ -15,6 +16,7 @@ const BIOMES = {
     grass: [0.48, 0.45, 0.2],
     upland: [0.68, 0.38, 0.19],
     rock: [0.42, 0.34, 0.28],
+    soil: [0.45, 0.29, 0.18],
     snow: [0.88, 0.76, 0.59],
   },
   highland: {
@@ -22,6 +24,7 @@ const BIOMES = {
     grass: [0.3, 0.46, 0.34],
     upland: [0.45, 0.49, 0.42],
     rock: [0.4, 0.44, 0.45],
+    soil: [0.35, 0.34, 0.29],
     snow: [0.9, 0.91, 0.84],
   },
 };
@@ -54,20 +57,24 @@ function valueNoise(x, z, seed) {
 export function sampleTerrainHeight(seed, x, z, { amplitude = 1, biome = "meadow" } = {}) {
   if (!Number.isFinite(x) || !Number.isFinite(z)) throw new TypeError("Terrain coordinates must be finite");
   const seedValue = hashSeed(seed);
-  const warpX = (valueNoise(x * 0.014, z * 0.014, seedValue ^ 0x2c1b3c6d) - 0.5) * 8;
-  const warpZ = (valueNoise(x * 0.014, z * 0.014, seedValue ^ 0x297a2d39) - 0.5) * 8;
+  const warpX = (valueNoise(x * 0.012, z * 0.012, seedValue ^ 0x2c1b3c6d) - 0.5) * 10;
+  const warpZ = (valueNoise(x * 0.012, z * 0.012, seedValue ^ 0x297a2d39) - 0.5) * 10;
   const wx = x + warpX;
   const wz = z + warpZ;
-  const broad = (valueNoise(wx * 0.026, wz * 0.026, seedValue) - 0.5) * 5.2;
-  const hills = (valueNoise(wx * 0.073, wz * 0.073, seedValue ^ 0x6d2b79f5) - 0.5) * 1.55;
-  const detail = (valueNoise(wx * 0.23, wz * 0.23, seedValue ^ 0x1b873593) - 0.5) * 0.26;
-  const ridgeNoise = valueNoise(wx * 0.043, wz * 0.043, seedValue ^ 0x9e3779b9);
-  const ridge = Math.pow(1 - Math.abs(ridgeNoise * 2 - 1), 2.3) * (biome === "highland" ? 2.0 : 0.78);
+  const broad = (valueNoise(wx * 0.021, wz * 0.021, seedValue) - 0.5) * 5.5;
+  const hills = (valueNoise(wx * 0.057, wz * 0.057, seedValue ^ 0x6d2b79f5) - 0.5) * 1.8;
+  const detail = (valueNoise(wx * 0.16, wz * 0.16, seedValue ^ 0x1b873593) - 0.5) * 0.42;
+  const micro = (valueNoise(wx * 0.34, wz * 0.34, seedValue ^ 0x27d4eb2f) - 0.5) * 0.1;
+  const ridgeNoise = valueNoise(wx * 0.032, wz * 0.032, seedValue ^ 0x9e3779b9);
+  const ridgeDetail = valueNoise(wx * 0.074, wz * 0.074, seedValue ^ 0x85ebca6b);
+  const ridgeLine = 1 - Math.abs(ridgeNoise * 2 - 1);
+  const ridgeSpur = 1 - Math.abs(ridgeDetail * 2 - 1);
+  const ridge = (Math.pow(ridgeLine, 2.5) * 0.72 + Math.pow(ridgeSpur, 3.2) * 0.28) * (biome === "highland" ? 2.15 : 0.8);
   const drainageNoise = valueNoise(wx * 0.034, wz * 0.034, seedValue ^ 0x165667b1);
-  const channel = Math.pow(1 - Math.abs(drainageNoise * 2 - 1), 4);
-  const valley = channel * (biome === "highland" ? 0.72 : 0.34);
+  const channel = Math.pow(1 - Math.abs(drainageNoise * 2 - 1), 6);
+  const valley = channel * (biome === "highland" ? 0.86 : 0.42);
   const biomeScale = biome === "highland" ? 1.38 : 1;
-  return (broad + hills + detail + ridge - valley - 0.28) * amplitude * biomeScale;
+  return (broad + hills + detail + micro + ridge - valley - 0.28) * amplitude * biomeScale;
 }
 
 // Finite-difference slope is shared by vegetation placement so roots avoid near-cliffs.
@@ -90,16 +97,20 @@ function faceNormal([a, b, c]) {
   return n.map((value) => value / length);
 }
 
-function terrainColor(height, normal, palette, variation) {
+function terrainColor(height, normal, palette, variation, moisture, soil) {
   const lowBlend = Math.max(0, Math.min(1, (height + 2.1) / 2.6));
   const highBlend = Math.max(0, Math.min(1, (height - 0.3) / 3.1));
   let color = mix(palette.low, palette.grass, lowBlend);
+  color = mix(color, palette.low, Math.max(0, moisture - 0.66) * 0.2);
   color = mix(color, palette.upland, highBlend * 0.78);
   const steepness = Math.max(0, Math.min(1, (0.97 - normal[1]) * 1.8));
   color = mix(color, palette.rock, steepness * 0.9);
+  const bareSoil = Math.max(0, Math.min(1, (soil - 0.68) * 2.5)) * (1 - steepness * 0.62) * (1 - highBlend * 0.68);
+  color = mix(color, palette.soil, bareSoil * 0.42);
   const snow = Math.max(0, Math.min(1, (height - 2.65) / 1.4));
   color = mix(color, palette.snow, snow);
-  return color.map((channel) => Math.max(0, Math.min(1, channel * (0.95 + variation * 0.1))));
+  const pigment = 0.92 + variation * 0.14 + (moisture - 0.5) * 0.055;
+  return color.map((channel) => Math.max(0, Math.min(1, channel * pigment)));
 }
 
 export function createTerrain(seed, { width = 48, depth = 48, resolution = 56, biome = "meadow", amplitude = 1 } = {}) {
@@ -143,8 +154,12 @@ export function createTerrain(seed, { width = 48, depth = 48, resolution = 56, b
         const normal = faceNormal(triangle);
         const height = (triangle[0][1] + triangle[1][1] + triangle[2][1]) / 3;
         const variation = latticeHash(x + (seedValue & 255), z - (seedValue & 127), seedValue);
-        const color = terrainColor(height, normal, palette, variation);
-        const center = [(triangle[0][0] + triangle[1][0] + triangle[2][0]) / 3, minHeight - 20, (triangle[0][2] + triangle[1][2] + triangle[2][2]) / 3];
+        const centerX = (triangle[0][0] + triangle[1][0] + triangle[2][0]) / 3;
+        const centerZ = (triangle[0][2] + triangle[1][2] + triangle[2][2]) / 3;
+        const moisture = valueNoise(centerX * 0.061, centerZ * 0.061, seedValue ^ 0x3c6ef372);
+        const soil = valueNoise(centerX * 0.13, centerZ * 0.13, seedValue ^ 0xa54ff53a);
+        const color = terrainColor(height, normal, palette, variation, moisture, soil);
+        const center = [centerX, minHeight - 20, centerZ];
         mesh.addFlatTriangle(triangle, color, center);
       }
     }

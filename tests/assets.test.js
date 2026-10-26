@@ -55,7 +55,7 @@ test("built-in generators produce repeatable geometry from a type and seed", () 
 });
 
 test("tree species have distinct portable silhouettes and a naturally spaced grove", () => {
-  const species = ["broadleaf", "sakura", "red-maple", "evergreen", "willow", "ginkgo"];
+  const species = ["broadleaf", "sakura", "red-maple", "evergreen", "willow", "ginkgo", "acacia", "dogwood", "redbud", "palm"];
   const trees = species.map((variant) => createAsset("tree", "tree-variation", { variant }));
   assert.deepEqual(trees.map((tree) => tree.spec.params.variant), species);
   assert.equal(new Set(trees.map((tree) => Array.from(tree.geometry.vertices).join(","))).size, species.length, "each species should produce a distinct mesh silhouette");
@@ -66,15 +66,18 @@ test("tree species have distinct portable silhouettes and a naturally spaced gro
     count: 22,
     width: 24,
     depth: 22,
+    avoidPaths: [{ points: [[0, -11], [0, 11]], width: 4 }],
     terrainSeed: terrain.spec.seed,
     terrainParams: terrain.spec.params,
   });
   assert.equal(grove.spec.children.length, 22);
+  assert.equal(grove.spec.params.avoidPaths.length, 1);
   assert.ok(new Set(grove.spec.children.map((tree) => tree.params.variant)).size >= 3);
   for (const tree of grove.spec.children) {
     const [x, y, z] = tree.position;
     const expectedY = sampleTerrainHeight(terrain.spec.seed, x, z, terrain.spec.params);
     assert.ok(Math.abs(y - expectedY) < 1e-5, "grove trunks should follow the seeded terrain surface");
+    assert.ok(Math.abs(x) >= 3.45, "tree trunks should keep clear of the river corridor");
   }
   for (let i = 0; i < grove.spec.children.length; i++) {
     const [x, , z] = grove.spec.children[i].position;

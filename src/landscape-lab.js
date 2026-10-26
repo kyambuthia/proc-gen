@@ -38,9 +38,13 @@ const TREE_COLORS = {
   sugi: "#1e6654",
   kinmokusei: "#edaa28",
   magnolia: "#f2c6d1",
+  acacia: "#adab55",
+  dogwood: "#f5e5c9",
+  redbud: "#ca6fb5",
+  palm: "#62bd71",
 };
-const TREE_COUNT = 36;
-const GROUND_COVER_COUNT = 680;
+const TREE_COUNT = 44;
+const GROUND_COVER_COUNT = 840;
 const TERRAIN_WIDTH = 48;
 const TERRAIN_DEPTH = 48;
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -78,10 +82,11 @@ function growLandscape() {
     nextTerrain = createAsset("terrain", seed, {
       width: TERRAIN_WIDTH,
       depth: TERRAIN_DEPTH,
-      resolution: 56,
+      resolution: 64,
       biome,
-      amplitude: biome === "highland" ? 1.85 : 1.5,
+      amplitude: biome === "highland" ? 2.3 : 2,
     });
+    const riverX = 9;
     nextTrees = createAsset("grove", seed, {
       count: TREE_COUNT,
       width: 44,
@@ -89,6 +94,7 @@ function growLandscape() {
       biome,
       terrainSeed: nextTerrain.spec.seed,
       terrainParams: nextTerrain.spec.params,
+      avoidPaths: [{ points: [[riverX, -23], [riverX, 23]], width: 8 }],
     });
     nextRiver = createAsset("water", `${seed}:river`, {
       shape: "river",
@@ -103,7 +109,6 @@ function growLandscape() {
       indices: nextRiver.geometry.indices,
       stride: nextRiver.geometry.stride,
     };
-    const riverX = 9;
     for (let i = 0; i < nextRiverGeometry.vertices.length; i += nextRiverGeometry.stride) {
       nextRiverGeometry.vertices[i] += riverX;
       nextRiverGeometry.vertices[i + 1] = sampleTerrainHeight(

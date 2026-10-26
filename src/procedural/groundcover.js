@@ -149,7 +149,7 @@ export function createGroundcover(seed, {
 
   const seedValue = hashSeed(seed);
   const rng = createRng(deriveSeed(seedValue, "groundcover-layout"));
-  const patchCount = count === 0 ? 0 : Math.max(3, Math.min(10, Math.round(Math.sqrt(count) / 3)));
+  const patchCount = count === 0 ? 0 : Math.max(4, Math.min(16, Math.round(Math.sqrt(count) / 2.2)));
   const inArea = (x, z) => areas === null || areas.some((polygon) => pointInPolygon([x, z], polygon));
   const preparedPaths = avoidPaths.map((path) => {
     const xs = path.points.map(([x]) => x);
@@ -157,7 +157,7 @@ export function createGroundcover(seed, {
     return { ...path, minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
   });
   const clearOfObjects = (x, z) => {
-    const plantRadius = 0.48;
+    const plantRadius = 0.62;
     if (exclusions.some((box) => x >= box.minX - plantRadius && x <= box.maxX + plantRadius && z >= box.minZ - plantRadius && z <= box.maxZ + plantRadius)) return false;
     if (preparedPaths.some((path) => {
       const limit = path.width * 0.5 + plantRadius + 0.2;
@@ -183,7 +183,7 @@ export function createGroundcover(seed, {
     const point = samplePoint();
     return point ? { x: point.localX, z: point.localZ } : { x: 0, z: 0 };
   });
-  const deviation = Math.min(width, depth) / Math.sqrt(Math.max(patchCount, 1)) * 0.22;
+  const deviation = Math.min(width, depth) / Math.sqrt(Math.max(patchCount, 1)) * 0.25;
   const positions = [];
   const marginX = Math.min(0.7, width * 0.05);
   const marginZ = Math.min(0.7, depth * 0.05);
@@ -225,11 +225,11 @@ export function createGroundcover(seed, {
     const vertexStart = mesh.vertices.length;
     const indexStart = mesh.indices.length;
     const countsBefore = [flowerCount, fernCount, shrubCount, rosetteCount, bladeCount, leafCount, foliageClumps, litterLeaves];
-    const blades = 3 + Math.floor(rng() * 3);
-    const clumpRadius = 0.2 + rng() * 0.22;
+    const blades = 5 + Math.floor(rng() * 4);
+    const clumpRadius = 0.26 + rng() * 0.3;
     const foliageKind = rng();
-    const hasFern = foliageKind < (biome === "forest" ? 0.2 : 0.11);
-    const hasShrub = !hasFern && foliageKind < (biome === "forest" ? 0.34 : 0.23);
+    const hasFern = foliageKind < (biome === "forest" ? 0.24 : 0.14);
+    const hasShrub = !hasFern && foliageKind < (biome === "forest" ? 0.4 : 0.29);
     const hasRosette = !hasFern && !hasShrub && rng() < (biome === "forest" ? 0.14 : 0.18);
     const bladeCountForClump = blades + (rng() < 0.2 ? 1 : 0);
     for (let blade = 0; blade < bladeCountForClump; blade++) {
