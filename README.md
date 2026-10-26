@@ -26,6 +26,17 @@ Procedural assets use a seeded registry: `createAsset(type, seed, params)` build
 serializable spec; `serializeAsset` and `rebuildAsset` save and restore that recipe without storing
 GPU buffers. Current types are `tree`, `grove`, `rock`, `rock-field`, `cat`, and `car`.
 
+The first OpenStreetMap adapter lives in `src/world/openstreetmap.js`. It can request a small
+Overpass bounding box or compile an Overpass JSON response into seeded road, waterway, water, green
+space, and simple building meshes. `createOsmScene` returns CPU mesh chunks ready for upload through
+the direct WebGL mesh path; `serializeOsmScene` stores portable feature data and required OpenStreetMap
+attribution without GPU geometry. The query is capped at 0.02 degrees per side, and import guards
+bound element, feature, coordinate, and total mesh vertex counts. The adapter currently reads way geometry, treats
+buildings as simple extrusions, and has no terrain elevation, relation multipolygons, or physics/nav
+conversion yet. Imported scenes are a data and mesh foundation; the active arena renderer does not
+load them into gameplay yet. Map data is © OpenStreetMap contributors under the ODbL; retain the
+attribution in any exported or displayed scene.
+
 ## Controls
 
 | Key | Action |
@@ -75,6 +86,7 @@ civilians run away.
 | `src/graphics/webgl2.js` | Shader compilation, GPU buffers, and instanced mesh upload |
 | `src/procedural/mesh-builder.js` | CPU mesh construction for boxes, ellipsoids, capsules, and merged assets |
 | `src/procedural/assets.js` | Public registry and JSON import/export for generated asset recipes |
+| `src/world/openstreetmap.js` | Bounded Overpass requests, OSM way parsing, local projection, mesh compilation, and portable scene import/export |
 
 Each NPC brain returns the same `{ x, z, run, jump }` input the player produces, so a body does not
 know who is steering it. The game logic has no dependency on the renderer: the tests in `tests/`
@@ -82,6 +94,6 @@ run the real world, characters and brains headlessly in Node.
 
 ## Tests
 
-`npm test` runs the suite with Node's built-in test runner. It covers the ray
-maths, path validity, arena generation, character stability and walking, gunner behaviour,
-flanking, and the wave director.
+`npm test` runs the suite with Node's built-in test runner. It covers the ray maths, path validity,
+arena generation, character stability and walking, gunner behaviour, flanking, the wave director,
+and OSM bounds, attribution, deterministic mesh generation, and scene round-tripping.
