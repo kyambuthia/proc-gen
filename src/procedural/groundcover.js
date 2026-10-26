@@ -1,7 +1,7 @@
 import { createRng, deriveSeed, hashSeed } from "./seed.js";
 import { MeshBuilder } from "./mesh-builder.js";
 import { registerAssetGenerator } from "./asset-registry.js";
-import { sampleTerrainHeight } from "./terrain.js";
+import { sampleTerrainHeight, sampleTerrainMoisture, sampleTerrainSlope } from "./terrain.js";
 
 const VERTEX_STRIDE = 11;
 const PALETTES = {
@@ -23,6 +23,7 @@ const PALETTES = {
 };
 
 const choose = (rng, values) => values[Math.floor(rng() * values.length)];
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 function addBlade(mesh, base, angle, height, width, baseColor, tipColor, wind) {
   const side = [Math.cos(angle) * width, 0, Math.sin(angle) * width];
@@ -226,10 +227,16 @@ export function createGroundcover(seed, {
     const indexStart = mesh.indices.length;
     const countsBefore = [flowerCount, fernCount, shrubCount, rosetteCount, bladeCount, leafCount, foliageClumps, litterLeaves];
     const blades = 5 + Math.floor(rng() * 4);
-    const clumpRadius = 0.26 + rng() * 0.3;
+    const clumpRadius = 0.31 + rng() * 0.38;
+    const moisture = terrainSeed === null ? 0.5 : sampleTerrainMoisture(terrainSeed, point.x, point.z, terrainParams);
+    const slope = terrainSeed === null ? 0 : sampleTerrainSlope(terrainSeed, point.x, point.z, terrainParams, 0.9);
+    const slopeStress = clamp((slope - 0.48) * 0.42, 0, 0.42);
+    const vigor = clamp(0.74 + moisture * 0.42 - slopeStress, 0.54, 1.16);
     const foliageKind = rng();
-    const hasFern = foliageKind < (biome === "forest" ? 0.24 : 0.14);
-    const hasShrub = !hasFern && foliageKind < (biome === "forest" ? 0.4 : 0.29);
+    const fernChance = (biome === "forest" ? 0.13 : 0.055) + moisture * 0.18;
+    const shrubChance = fernChance + (biome === "forest" ? 0.18 : 0.115);
+    const hasFern = foliageKind < fernChance;
+    const hasShrub = !hasFern && foliageKind < shrubChance;
     const hasRosette = !hasFern && !hasShrub && rng() < (biome === "forest" ? 0.14 : 0.18);
     const bladeCountForClump = blades + (rng() < 0.2 ? 1 : 0);
     for (let blade = 0; blade < bladeCountForClump; blade++) {
@@ -239,11 +246,17 @@ export function createGroundcover(seed, {
       const z = point.z + Math.sin(angle) * radial;
       const y = terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, x, z, terrainParams);
       const base = [x, y, z];
-      const heightScale = biome === "forest" ? 0.76 : 1;
-      const height = (0.38 + rng() * 0.5) * heightScale;
-      const baseColor = choose(rng, palette.grass);
+      const heightScale = (biome === "forest" ? 0.76 : 1) * vigor;
+      const broadBlade = rng() < 0.28;
+      const height = (0.34 + rng() * 0.48) * heightScale * (broadBlade ? 0.84 : 1);
+      const bladeWidth = (broadBlade ? 0.075 : 0.045) + rng() * (broadBlade ? 0.045 : 0.04);
+      const baseColor = choose(rng, palette.grass).map((channel, axis) => {
+        const deepWetGreen = axis === 1 ? 1 + (moisture - 0.5) * 0.2 : 1 - (moisture - 0.5) * 0.06;
+        const dryGold = Math.max(0, 0.44 - moisture) * (axis === 0 ? 0.28 : axis === 1 ? 0.16 : -0.08);
+        return clamp(channel * deepWetGreen + dryGold, 0.02, 1);
+      });
       const tipColor = baseColor.map((channel, i) => Math.min(1, channel * (i === 1 ? 1.28 : 1.12) + (i === 1 ? 0.035 : 0.012)));
-      addBlade(mesh, base, angle + rng() * 0.7, height, 0.055 + rng() * 0.045, baseColor, tipColor, 0.9);
+      addBlade(mesh, base, angle + rng() * 0.7, height, bladeWidth, baseColor, tipColor, 0.9);
       bladeCount++;
     }
 
@@ -314,7 +327,8 @@ export function createGroundcover(seed, {
       mesh.addEllipsoid([point.x, budY, point.z], [0.045, 0.035, 0.045], choose(rng, palette.flower), 4, 2, 0.4);
     }
 
-    if (rng() < (biome === "forest" ? 0.045 : 0.085)) {
+    const flowerChance = Math.max(0.012, (biome === "forest" ? 0.025 : 0.062) + moisture * 0.038 - slopeStress * 0.08);
+    if (rng() < flowerChance) {
       const flower = choose(rng, palette.flower);
       const size = biome === "forest" ? 0.075 : 0.1;
       const flowerY = (terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, point.x, point.z, terrainParams)) + 0.2;

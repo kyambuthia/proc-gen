@@ -197,13 +197,20 @@ export class MeshBuilder {
     }
   }
 
-  append(mesh, offset = [0, 0, 0], scale = 1) {
+  append(mesh, offset = [0, 0, 0], scale = 1, rotationY = 0) {
     const base = this.vertices.length / STRIDE;
     const data = mesh.vertices;
+    const cosine = Math.cos(rotationY);
+    const sine = Math.sin(rotationY);
     for (let i = 0; i < data.length; i += STRIDE) {
+      const x = data[i] * scale;
+      const z = data[i + 2] * scale;
+      const normalX = data[i + 3];
+      const normalZ = data[i + 5];
       this.vertices.push(
-        data[i] * scale + offset[0], data[i + 1] * scale + offset[1], data[i + 2] * scale + offset[2],
-        data[i + 3], data[i + 4], data[i + 5], data[i + 6], data[i + 7], data[i + 8], data[i + 9], data[i + 10],
+        x * cosine + z * sine + offset[0], data[i + 1] * scale + offset[1], -x * sine + z * cosine + offset[2],
+        normalX * cosine + normalZ * sine, data[i + 4], -normalX * sine + normalZ * cosine,
+        data[i + 6], data[i + 7], data[i + 8], data[i + 9], data[i + 10],
       );
     }
     for (const i of mesh.indices) this.indices.push(base + i);

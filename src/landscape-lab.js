@@ -42,8 +42,12 @@ const TREE_COLORS = {
   dogwood: "#f5e5c9",
   redbud: "#ca6fb5",
   palm: "#62bd71",
+  keyaki: "#82b664",
+  karamatsu: "#e8b84d",
+  camellia: "#dc5963",
+  yamazakura: "#f09fbd",
 };
-const TREE_COUNT = 44;
+const TREE_COUNT = 52;
 const GROUND_COVER_COUNT = 840;
 const TERRAIN_WIDTH = 48;
 const TERRAIN_DEPTH = 48;

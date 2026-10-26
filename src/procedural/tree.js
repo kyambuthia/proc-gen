@@ -1,13 +1,13 @@
 import { createRng, deriveSeed, hashSeed } from "./seed.js";
 import { MeshBuilder } from "./mesh-builder.js";
 import { registerAssetGenerator } from "./asset-registry.js";
-import { sampleTerrainHeight, sampleTerrainSlope } from "./terrain.js";
+import { sampleTerrainHeight, sampleTerrainMoisture, sampleTerrainSlope } from "./terrain.js";
 
 export const TREE_VARIANTS = [
   "broadleaf", "sakura", "red-maple", "evergreen", "willow", "ginkgo",
   "birch", "flame", "wisteria", "bamboo", "cloud-pine", "cypress",
   "ume", "momiji", "akamatsu", "hinoki", "shidare-sakura", "sugi", "kinmokusei", "magnolia",
-  "acacia", "dogwood", "redbud", "palm",
+  "acacia", "dogwood", "redbud", "palm", "keyaki", "karamatsu", "camellia", "yamazakura",
 ];
 
 const BARK = {
@@ -35,6 +35,10 @@ const BARK = {
   dogwood: [[0.36, 0.2, 0.14], [0.5, 0.31, 0.2], [0.62, 0.42, 0.27]],
   redbud: [[0.33, 0.17, 0.13], [0.49, 0.27, 0.19], [0.63, 0.37, 0.26]],
   palm: [[0.38, 0.25, 0.14], [0.52, 0.34, 0.19], [0.64, 0.43, 0.24]],
+  keyaki: [[0.31, 0.18, 0.12], [0.45, 0.28, 0.17], [0.57, 0.37, 0.23]],
+  karamatsu: [[0.29, 0.18, 0.12], [0.43, 0.27, 0.16], [0.55, 0.36, 0.22]],
+  camellia: [[0.25, 0.16, 0.13], [0.39, 0.24, 0.17], [0.53, 0.33, 0.22]],
+  yamazakura: [[0.28, 0.14, 0.14], [0.42, 0.22, 0.2], [0.55, 0.31, 0.25]],
 };
 
 const LEAVES = {
@@ -62,6 +66,10 @@ const LEAVES = {
   dogwood: [[0.18, 0.44, 0.24], [0.31, 0.56, 0.29], [0.98, 0.91, 0.78], [1, 0.78, 0.82], [0.96, 0.69, 0.64]],
   redbud: [[0.22, 0.42, 0.24], [0.38, 0.54, 0.29], [0.76, 0.34, 0.76], [0.92, 0.52, 0.84], [0.99, 0.7, 0.86]],
   palm: [[0.12, 0.35, 0.24], [0.21, 0.48, 0.29], [0.36, 0.59, 0.31], [0.55, 0.68, 0.35]],
+  keyaki: [[0.2, 0.4, 0.23], [0.31, 0.53, 0.27], [0.47, 0.63, 0.31], [0.78, 0.67, 0.27], [0.88, 0.43, 0.18]],
+  karamatsu: [[0.08, 0.31, 0.23], [0.15, 0.43, 0.29], [0.26, 0.52, 0.32], [0.84, 0.62, 0.2], [0.98, 0.73, 0.25], [0.94, 0.43, 0.14]],
+  camellia: [[0.045, 0.27, 0.19], [0.07, 0.39, 0.24], [0.13, 0.48, 0.28], [0.82, 0.13, 0.18], [0.96, 0.31, 0.38], [1, 0.75, 0.78]],
+  yamazakura: [[0.19, 0.43, 0.27], [0.31, 0.57, 0.31], [0.54, 0.67, 0.36], [0.96, 0.61, 0.76], [1, 0.79, 0.84], [0.98, 0.9, 0.82]],
 };
 
 const TREE_STYLE = {
@@ -89,16 +97,35 @@ const TREE_STYLE = {
   dogwood: { height: [2.8, 4.2], crown: 0.73, spread: 1.26, clusters: [10, 15], crownKind: "dogwood" },
   redbud: { height: [2.9, 4.3], crown: 0.68, spread: 1.34, clusters: [12, 18], crownKind: "redbud" },
   palm: { height: [5.1, 7.2], crown: 0.84, spread: 1.35, clusters: [7, 9], crownKind: "palm" },
+  keyaki: { height: [4.8, 7.2], crown: 0.68, spread: 1.68, clusters: [14, 20], crownKind: "vase" },
+  karamatsu: { height: [4.6, 6.8], crown: 0.76, spread: 1.27, clusters: [7, 10], crownKind: "golden-conifer" },
+  camellia: { height: [2.5, 3.8], crown: 0.78, spread: 1.16, clusters: [12, 18], crownKind: "camellia" },
+  yamazakura: { height: [3.6, 5.4], crown: 0.67, spread: 1.49, clusters: [12, 18], crownKind: "wild-blossom" },
 };
 
 const GROVE_SPECIES = {
-  meadow: ["broadleaf", "broadleaf", "sakura", "red-maple", "evergreen", "willow", "ginkgo", "birch", "flame", "wisteria", "bamboo", "cloud-pine", "cypress", "ume", "momiji", "akamatsu", "hinoki", "shidare-sakura", "sugi", "kinmokusei", "magnolia", "acacia", "dogwood", "redbud", "palm"],
-  autumn: ["broadleaf", "red-maple", "red-maple", "ginkgo", "flame", "flame", "momiji", "momiji", "willow", "birch", "akamatsu", "hinoki", "evergreen", "sugi", "kinmokusei", "magnolia", "acacia", "dogwood", "redbud"],
-  highland: ["evergreen", "evergreen", "cloud-pine", "cypress", "akamatsu", "hinoki", "birch", "bamboo", "willow", "broadleaf", "sugi", "magnolia", "dogwood", "redbud"],
+  meadow: ["broadleaf", "broadleaf", "sakura", "red-maple", "evergreen", "willow", "ginkgo", "birch", "flame", "wisteria", "bamboo", "cloud-pine", "cypress", "ume", "momiji", "akamatsu", "hinoki", "shidare-sakura", "sugi", "kinmokusei", "magnolia", "acacia", "dogwood", "redbud", "palm", "keyaki", "karamatsu", "camellia", "yamazakura"],
+  autumn: ["broadleaf", "red-maple", "red-maple", "ginkgo", "flame", "flame", "momiji", "momiji", "willow", "birch", "akamatsu", "hinoki", "evergreen", "sugi", "kinmokusei", "magnolia", "acacia", "dogwood", "redbud", "keyaki", "karamatsu", "camellia", "yamazakura"],
+  highland: ["evergreen", "evergreen", "cloud-pine", "cypress", "akamatsu", "hinoki", "birch", "bamboo", "willow", "broadleaf", "sugi", "magnolia", "dogwood", "redbud", "keyaki", "karamatsu", "yamazakura"],
 };
 
 const choose = (rng, values) => values[Math.floor(rng() * values.length)];
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const WET_SPECIES = new Set(["willow", "bamboo", "camellia", "palm"]);
+const DRY_SPECIES = new Set(["cloud-pine", "cypress", "akamatsu", "hinoki", "sugi", "karamatsu"]);
+
+function chooseHabitatSpecies(rng, species, moisture) {
+  const weights = species.map((variant) => WET_SPECIES.has(variant)
+    ? 0.55 + moisture * 1.6
+    : DRY_SPECIES.has(variant) ? 0.55 + (1 - moisture) * 1.5 : 1);
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  let pick = rng() * total;
+  for (let i = 0; i < species.length; i++) {
+    pick -= weights[i];
+    if (pick <= 0) return species[i];
+  }
+  return species[species.length - 1];
+}
 
 function addCone(mesh, centerY, radius, height, color, segments = 8, wind = 0.4) {
   const apex = [0, centerY + height, 0];
@@ -202,6 +229,99 @@ function buildCrown(mesh, rng, variant, style, crownY, height, spread, trunkRadi
         const blossom = choose(rng, palette.slice(2));
         mesh.addEllipsoid(center, [0.16 + rng() * 0.08, 0.14 + rng() * 0.08, 0.16 + rng() * 0.08], leaf, 5, 2, 0.82);
         if (rng() < 0.72) mesh.addEllipsoid([center[0], center[1] + 0.06, center[2]], [0.09, 0.09, 0.09], blossom, 4, 2, 0.94);
+      }
+    }
+    return;
+  }
+
+  if (style.crownKind === "vase") {
+    const tiers = 5;
+    for (let tier = 0; tier < tiers; tier++) {
+      const fraction = tier / (tiers - 1);
+      const radius = spread * (0.38 + fraction * 0.53);
+      const lobes = 6 + tier;
+      for (let lobe = 0; lobe < lobes; lobe++) {
+        const angle = (lobe / lobes) * Math.PI * 2 + rng() * 0.22;
+        const reach = radius * (0.42 + rng() * 0.34);
+        const center = [Math.cos(angle) * reach, crownY - 0.52 + fraction * 1.02 + (rng() - 0.5) * 0.18, Math.sin(angle) * reach];
+        const size = 0.31 + rng() * 0.12;
+        mesh.addEllipsoid(center, [size * 1.2, size * 0.82, size], choose(rng, palette), 6, 3, 0.68 + fraction * 0.2);
+      }
+    }
+    return;
+  }
+
+  if (style.crownKind === "golden-conifer") {
+    const tiers = 6;
+    for (let tier = 0; tier < tiers; tier++) {
+      const fraction = tier / tiers;
+      const y = crownY * (0.42 + fraction * 0.68);
+      const radius = spread * (0.86 - fraction * 0.68) * (0.9 + rng() * 0.16);
+      const lobes = 5 + (tier % 2);
+      for (let lobe = 0; lobe < lobes; lobe++) {
+        const angle = (lobe / lobes) * Math.PI * 2 + rng() * 0.24;
+        const reach = radius * (0.36 + rng() * 0.22);
+        const center = [Math.cos(angle) * reach, y + (rng() - 0.5) * 0.15, Math.sin(angle) * reach];
+        mesh.addEllipsoid(center, [0.29 + radius * 0.24, 0.16 + rng() * 0.08, 0.28 + radius * 0.22], choose(rng, palette), 6, 3, 0.58 + fraction * 0.3);
+      }
+    }
+    return;
+  }
+
+  if (style.crownKind === "camellia") {
+    const tiers = 4;
+    for (let tier = 0; tier < tiers; tier++) {
+      const fraction = tier / (tiers - 1);
+      const lobes = 5 + tier;
+      const radius = spread * (0.62 - fraction * 0.16);
+      for (let lobe = 0; lobe < lobes; lobe++) {
+        const angle = (lobe / lobes) * Math.PI * 2 + rng() * 0.2;
+        const reach = radius * (0.35 + rng() * 0.46);
+        const center = [Math.cos(angle) * reach, crownY - 0.12 + fraction * 0.58 + (rng() - 0.5) * 0.15, Math.sin(angle) * reach];
+        mesh.addEllipsoid(center, [0.34 + rng() * 0.08, 0.26 + rng() * 0.08, 0.32 + rng() * 0.08], choose(rng, palette.slice(0, 3)), 6, 3, 0.42);
+        if (rng() < 0.42) {
+          const bloom = choose(rng, palette.slice(3));
+          const flowerAngle = rng() * Math.PI * 2;
+          for (let petal = 0; petal < 5; petal++) {
+            const a = flowerAngle + (petal / 5) * Math.PI * 2;
+            mesh.addEllipsoid(
+              [center[0] + Math.cos(a) * 0.1, center[1] + 0.13, center[2] + Math.sin(a) * 0.1],
+              [0.085, 0.05, 0.07], bloom, 4, 2, 0.85,
+            );
+          }
+          mesh.addEllipsoid([center[0], center[1] + 0.16, center[2]], [0.045, 0.04, 0.045], [1, 0.82, 0.46], 4, 2, 0.72);
+        }
+      }
+    }
+    return;
+  }
+
+  if (style.crownKind === "wild-blossom") {
+    const branches = 8 + Math.floor(rng() * 3);
+    for (let branch = 0; branch < branches; branch++) {
+      const angle = (branch / branches) * Math.PI * 2 + rng() * 0.28;
+      const reach = spread * (0.48 + rng() * 0.46);
+      const startY = crownY * (0.68 + rng() * 0.16);
+      const start = [Math.cos(angle) * trunkRadius * 0.45, startY, Math.sin(angle) * trunkRadius * 0.45];
+      const end = [Math.cos(angle) * reach, startY + 0.36 + rng() * 0.18, Math.sin(angle) * reach];
+      mesh.addCylinder(start, end, trunkRadius * 0.2, 0.022, 5, choose(rng, BARK[variant]), 0.42);
+      const clusters = 2 + Math.floor(rng() * 2);
+      for (let cluster = 0; cluster < clusters; cluster++) {
+        const t = 0.38 + cluster * 0.24;
+        const center = [start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t, start[2] + (end[2] - start[2]) * t];
+        mesh.addEllipsoid(center, [0.28 + rng() * 0.15, 0.24 + rng() * 0.1, 0.28 + rng() * 0.15], choose(rng, palette.slice(0, 3)), 6, 3, 0.92);
+        if (rng() < 0.8) {
+          const blossom = choose(rng, palette.slice(3));
+          const flowerCount = 2 + Math.floor(rng() * 2);
+          for (let flower = 0; flower < flowerCount; flower++) {
+            const flowerAngle = rng() * Math.PI * 2;
+            const flowerRadius = 0.08 + rng() * 0.14;
+            mesh.addEllipsoid(
+              [center[0] + Math.cos(flowerAngle) * flowerRadius, center[1] + 0.1 + rng() * 0.08, center[2] + Math.sin(flowerAngle) * flowerRadius],
+              [0.09, 0.075, 0.085], blossom, 4, 2, 0.94,
+            );
+          }
+        }
       }
     }
     return;
@@ -621,7 +741,7 @@ export function createGrove(seed, count = 7, options = {}) {
   const trees = [];
   const seedValue = hashSeed(seed);
   const rng = createRng(deriveSeed(seedValue, "grove-layout"));
-  const patchCount = count === 0 ? 0 : Math.max(1, Math.min(12, Math.ceil(Math.sqrt(count * 2.1))));
+  const patchCount = count === 0 ? 0 : Math.max(1, Math.min(14, Math.ceil(Math.sqrt(count * 2.8))));
   const speciesOrder = [...new Set(GROVE_SPECIES[biome])];
   for (let i = speciesOrder.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
@@ -629,6 +749,7 @@ export function createGrove(seed, count = 7, options = {}) {
   }
   const patches = [];
   const patchSpacing = Math.min(width, depth) / Math.sqrt(patchCount) * 0.42;
+  const usedSpecies = new Set();
   for (let i = 0; i < patchCount; i++) {
     let center = null;
     for (let attempt = 0; attempt < 70 && !center; attempt++) {
@@ -636,7 +757,11 @@ export function createGrove(seed, count = 7, options = {}) {
       if (patches.every((patch) => Math.hypot(candidate[0] - patch.center[0], candidate[1] - patch.center[1]) >= patchSpacing)) center = candidate;
     }
     if (!center) center = [(rng() - 0.5) * width * 0.7, (rng() - 0.5) * depth * 0.7];
-    patches.push({ center, variant: speciesOrder[i % speciesOrder.length] });
+    const moisture = terrainSeed === null ? 0.5 : sampleTerrainMoisture(terrainSeed, center[0], center[1], terrainParams);
+    const unassigned = speciesOrder.filter((variant) => !usedSpecies.has(variant));
+    const variant = chooseHabitatSpecies(rng, unassigned.length ? unassigned : speciesOrder, moisture);
+    usedSpecies.add(variant);
+    patches.push({ center, variant });
   }
   const positions = [];
   const margin = Math.min(2, width * 0.12, depth * 0.12);
@@ -664,7 +789,10 @@ export function createGrove(seed, count = 7, options = {}) {
       ];
       const clearance = attempt < 200 ? minDistance : minDistance * 0.82;
       if (positions.every((other) => Math.hypot(candidate[0] - other.x, candidate[1] - other.z) >= clearance) && suitableTerrain(candidate[0], candidate[1])) {
-        const variant = i < patchCount || rng() < 0.64 ? patch.variant : choose(rng, GROVE_SPECIES[biome]);
+        const moisture = terrainSeed === null ? 0.5 : sampleTerrainMoisture(terrainSeed, candidate[0], candidate[1], terrainParams);
+        const variant = i < patchCount || rng() < 0.6
+          ? patch.variant
+          : chooseHabitatSpecies(rng, GROVE_SPECIES[biome], moisture);
         position = { x: candidate[0], z: candidate[1], variant };
       }
     }
@@ -701,10 +829,11 @@ export function createGrove(seed, count = 7, options = {}) {
     const item = positions[i];
     const tree = createTree(deriveSeed(seedValue, `tree-${i}`), { variant: item.variant });
     const scale = 0.7 + rng() * 0.58;
+    const rotation = rng() * Math.PI * 2;
     const y = terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, item.x, item.z, terrainParams);
     const position = [item.x, y, item.z];
-    merged.append(tree.geometry, position, scale);
-    trees.push({ ...tree.spec, position, scale });
+    merged.append(tree.geometry, position, scale, rotation);
+    trees.push({ ...tree.spec, position, scale, rotation });
   }
 
   const geometry = merged.build();

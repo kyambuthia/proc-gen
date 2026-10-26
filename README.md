@@ -23,7 +23,7 @@ as a single merged draw. Neither path uses a scene graph or texture lookups. The
 mobile hardware with OpenGL ES 3.0 class support.
 
 Open `/landscape-lab.html` for the seeded terrain and vegetation preview: rolling ridges and drainage,
-24 stylized anime trees, and low-poly grass, ferns, shrubs, flowers, and leaf litter. The terrain and
+28 stylized anime trees, habitat-aware grove placement, and low-poly grass, ferns, shrubs, flowers, and leaf litter. The terrain and
 ground cover stay within four draws and avoid texture sampling.
 
 Procedural assets use a seeded registry: `createAsset(type, seed, params)` builds geometry and a
