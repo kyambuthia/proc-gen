@@ -200,16 +200,25 @@ export function createTree(seed, { variant = "broadleaf" } = {}) {
   const spread = style.spread * (0.88 + rng() * 0.28);
   const bark = choose(rng, BARK[variant]);
   const trunkTop = [0.035 * (rng() - 0.5), crownY, 0.035 * (rng() - 0.5)];
-  mesh.addCylinder([0, 0, 0], trunkTop, trunkRadius, trunkRadius * 0.48, 7, bark, 0.025);
-
-  const branchCount = 4 + Math.floor(rng() * 5);
-  for (let i = 0; i < branchCount; i++) {
-    const angle = (i / branchCount) * Math.PI * 2 + rng() * 0.35;
-    const y = crownY * (0.49 + rng() * 0.25);
-    const length = spread * (0.5 + rng() * 0.34);
-    const droop = variant === "willow" ? 0.55 + rng() * 0.45 : 0;
-    const end = [Math.cos(angle) * length, y + 0.48 + rng() * 0.26 - droop, Math.sin(angle) * length];
-    mesh.addCylinder([Math.cos(angle) * trunkRadius * 0.5, y, Math.sin(angle) * trunkRadius * 0.5], end, trunkRadius * 0.4, trunkRadius * 0.12, 5, bark, 0.3);
+  if (variant !== "bamboo") {
+    mesh.addCylinder([0, 0, 0], trunkTop, trunkRadius, trunkRadius * 0.48, 7, bark, 0.025);
+    if (variant === "birch") {
+      for (let mark = 0; mark < 7; mark++) {
+        const angle = (mark / 7) * Math.PI * 2 + rng() * 0.3;
+        const y = height * (0.12 + rng() * 0.61);
+        const radius = trunkRadius * (1 - y / (height * 2));
+        mesh.addEllipsoid([Math.cos(angle) * radius, y, Math.sin(angle) * radius], [0.045, 0.022, 0.018], [0.24, 0.25, 0.23], 4, 2, 0.02);
+      }
+    }
+    const branchCount = 4 + Math.floor(rng() * 5);
+    for (let i = 0; i < branchCount; i++) {
+      const angle = (i / branchCount) * Math.PI * 2 + rng() * 0.35;
+      const y = crownY * (0.49 + rng() * 0.25);
+      const length = spread * (0.5 + rng() * 0.34);
+      const droop = variant === "willow" || variant === "wisteria" ? 0.55 + rng() * 0.45 : 0;
+      const end = [Math.cos(angle) * length, y + 0.48 + rng() * 0.26 - droop, Math.sin(angle) * length];
+      mesh.addCylinder([Math.cos(angle) * trunkRadius * 0.5, y, Math.sin(angle) * trunkRadius * 0.5], end, trunkRadius * 0.4, trunkRadius * 0.12, 5, bark, 0.3);
+    }
   }
 
   buildCrown(mesh, rng, variant, style, crownY, height, spread);
