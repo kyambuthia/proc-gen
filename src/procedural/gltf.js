@@ -10,6 +10,9 @@ const ELEMENT_ARRAY_BUFFER = 34963;
 const STRIDE = 11;
 const FLOAT_BYTES = 4;
 const GLTF_STRIDE_BYTES = STRIDE * FLOAT_BYTES;
+const WIND_DIRECTION = [0.82, 0.57];
+const WIND_STRENGTH = 0.2;
+const WIND_FRAMES = 8;
 
 const align4 = (size) => (size + 3) & ~3;
 
@@ -42,14 +45,92 @@ function assetGeometry(asset) {
   return { geometry, vertexCount, minimum, maximum };
 }
 
-function packGeometry(geometry) {
+function createWindClip(spec, geometry, vertexCount) {
+  if (!(["wind", "wind-driven-tail"].includes(spec.motion.kind))) return null;
+  let hasWind = false;
+  for (let i = 9; i < geometry.vertices.length; i += STRIDE) {
+    if (geometry.vertices[i] > 0.0001) {
+      hasWind = true;
+      break;
+    }
+  }
+  if (!hasWind) return null;
+
+  const frequency = Number.isFinite(spec.motion.frequency) && spec.motion.frequency > 0 ? spec.motion.frequency : 1.35;
+  const duration = (Math.PI * 2) / frequency;
+  const times = Float32Array.from({ length: WIND_FRAMES + 1 }, (_, frame) => duration * frame / WIND_FRAMES);
+  const weights = new Float32Array(times.length * WIND_FRAMES);
+  for (let frame = 0; frame < times.length; frame++) weights[frame * WIND_FRAMES + frame % WIND_FRAMES] = 1;
+
+  const targets = Array.from({ length: WIND_FRAMES }, (_, frame) => {
+    const positions = new Float32Array(vertexCount * 3);
+    const time = times[frame];
+    for (let vertex = 0; vertex < vertexCount; vertex++) {
+      const offset = vertex * STRIDE;
+      const positionOffset = vertex * 3;
+      const x = geometry.vertices[offset];
+      const y = geometry.vertices[offset + 1];
+      const z = geometry.vertices[offset + 2];
+      const phase = time * frequency + y * 1.7 + x * 0.41 + z * 0.29;
+      const sway = Math.sin(phase) * geometry.vertices[offset + 9] * WIND_STRENGTH;
+      positions[positionOffset] = WIND_DIRECTION[0] * sway;
+      positions[positionOffset + 2] = WIND_DIRECTION[1] * sway;
+    }
+    let min = [Infinity, Infinity, Infinity];
+    let max = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < positions.length; i += 3) {
+      for (let axis = 0; axis < 3; axis++) {
+        min[axis] = Math.min(min[axis], positions[i + axis]);
+        max[axis] = Math.max(max[axis], positions[i + axis]);
+      }
+    }
+    return { positions, min, max };
+  });
+  return {
+    name: spec.motion.kind === "wind-driven-tail" ? "Tail sway" : "Wind sway",
+    duration,
+    times,
+    weights,
+    targets,
+    frequency,
+  };
+}
+
+function packGeometry(geometry, clip) {
   const vertexByteLength = geometry.vertices.length * FLOAT_BYTES;
   const indexByteLength = geometry.indices.length * 2;
-  const binary = new Uint8Array(vertexByteLength + indexByteLength);
+  let cursor = vertexByteLength + indexByteLength;
+  const targetLayouts = [];
+  if (clip) {
+    for (const target of clip.targets) {
+      cursor = align4(cursor);
+      const positionOffset = cursor;
+      cursor += target.positions.length * FLOAT_BYTES;
+      targetLayouts.push({ positionOffset });
+    }
+    cursor = align4(cursor);
+    const timeOffset = cursor;
+    cursor += clip.times.length * FLOAT_BYTES;
+    cursor = align4(cursor);
+    const weightOffset = cursor;
+    cursor += clip.weights.length * FLOAT_BYTES;
+    clip.timeOffset = timeOffset;
+    clip.weightOffset = weightOffset;
+  }
+  const binary = new Uint8Array(cursor);
   const view = new DataView(binary.buffer);
   for (let i = 0; i < geometry.vertices.length; i++) view.setFloat32(i * FLOAT_BYTES, geometry.vertices[i], true);
   for (let i = 0; i < geometry.indices.length; i++) view.setUint16(vertexByteLength + i * 2, geometry.indices[i], true);
-  return { binary, vertexByteLength, indexByteLength };
+  if (clip) {
+    for (let target = 0; target < clip.targets.length; target++) {
+      const positions = clip.targets[target].positions;
+      const offset = targetLayouts[target].positionOffset;
+      for (let i = 0; i < positions.length; i++) view.setFloat32(offset + i * FLOAT_BYTES, positions[i], true);
+    }
+    for (let i = 0; i < clip.times.length; i++) view.setFloat32(clip.timeOffset + i * FLOAT_BYTES, clip.times[i], true);
+    for (let i = 0; i < clip.weights.length; i++) view.setFloat32(clip.weightOffset + i * FLOAT_BYTES, clip.weights[i], true);
+  }
+  return { binary, vertexByteLength, indexByteLength, targetLayouts };
 }
 
 function writeGlb(json, binary) {
@@ -82,9 +163,48 @@ function writeGlb(json, binary) {
 export function exportAssetGlb(asset) {
   const spec = deserializeAsset(asset?.spec);
   const { geometry, vertexCount, minimum, maximum } = assetGeometry(asset);
-  const { binary, vertexByteLength, indexByteLength } = packGeometry(geometry);
+  const clip = createWindClip(spec, geometry, vertexCount);
+  const { binary, vertexByteLength, indexByteLength, targetLayouts } = packGeometry(geometry, clip);
   const indexByteOffset = vertexByteLength;
   const indexCount = geometry.indices.length;
+  const bufferViews = [
+    { buffer: 0, byteOffset: 0, byteLength: vertexByteLength, byteStride: GLTF_STRIDE_BYTES, target: ARRAY_BUFFER },
+    { buffer: 0, byteOffset: indexByteOffset, byteLength: indexByteLength, target: ELEMENT_ARRAY_BUFFER },
+  ];
+  const accessors = [
+    { bufferView: 0, byteOffset: 0, componentType: FLOAT, count: vertexCount, type: "VEC3", min: minimum, max: maximum },
+    { bufferView: 0, byteOffset: 12, componentType: FLOAT, count: vertexCount, type: "VEC3" },
+    { bufferView: 0, byteOffset: 24, componentType: FLOAT, count: vertexCount, type: "VEC3" },
+    { bufferView: 0, byteOffset: 36, componentType: FLOAT, count: vertexCount, type: "SCALAR" },
+    { bufferView: 0, byteOffset: 40, componentType: FLOAT, count: vertexCount, type: "SCALAR" },
+    { bufferView: 1, byteOffset: 0, componentType: UNSIGNED_SHORT, count: indexCount, type: "SCALAR" },
+  ];
+  const morphTargets = [];
+  let animation = null;
+  if (clip) {
+    for (let i = 0; i < clip.targets.length; i++) {
+      const layout = targetLayouts[i];
+      const viewIndex = bufferViews.length;
+      const accessorIndex = accessors.length;
+      bufferViews.push({ buffer: 0, byteOffset: layout.positionOffset, byteLength: vertexCount * 3 * FLOAT_BYTES });
+      accessors.push({ bufferView: viewIndex, byteOffset: 0, componentType: FLOAT, count: vertexCount, type: "VEC3", min: clip.targets[i].min, max: clip.targets[i].max });
+      morphTargets.push({ POSITION: accessorIndex });
+    }
+    const timeView = bufferViews.length;
+    bufferViews.push({ buffer: 0, byteOffset: clip.timeOffset, byteLength: clip.times.length * FLOAT_BYTES });
+    const timeAccessor = accessors.length;
+    accessors.push({ bufferView: timeView, byteOffset: 0, componentType: FLOAT, count: clip.times.length, type: "SCALAR", min: [0], max: [clip.duration] });
+    const weightView = bufferViews.length;
+    bufferViews.push({ buffer: 0, byteOffset: clip.weightOffset, byteLength: clip.weights.length * FLOAT_BYTES });
+    const weightAccessor = accessors.length;
+    accessors.push({ bufferView: weightView, byteOffset: 0, componentType: FLOAT, count: clip.weights.length, type: "SCALAR" });
+    animation = {
+      name: clip.name,
+      samplers: [{ input: timeAccessor, output: weightAccessor, interpolation: "LINEAR" }],
+      channels: [{ sampler: 0, target: { node: 0, path: "weights" } }],
+      extras: { frequency: clip.frequency, sampledFrames: WIND_FRAMES, loopsAt: clip.duration },
+    };
+  }
   const document = {
     asset: {
       version: "2.0",
@@ -96,6 +216,7 @@ export function exportAssetGlb(asset) {
     nodes: [{ name: spec.type, mesh: 0 }],
     meshes: [{
       name: spec.type,
+      ...(clip ? { weights: Array(WIND_FRAMES).fill(0) } : {}),
       primitives: [{
         attributes: {
           POSITION: 0,
@@ -107,6 +228,7 @@ export function exportAssetGlb(asset) {
         indices: 5,
         material: 0,
         mode: 4,
+        ...(clip ? { targets: morphTargets } : {}),
       }],
     }],
     materials: [{
@@ -118,18 +240,9 @@ export function exportAssetGlb(asset) {
       },
     }],
     buffers: [{ byteLength: binary.length }],
-    bufferViews: [
-      { buffer: 0, byteOffset: 0, byteLength: vertexByteLength, byteStride: GLTF_STRIDE_BYTES, target: ARRAY_BUFFER },
-      { buffer: 0, byteOffset: indexByteOffset, byteLength: indexByteLength, target: ELEMENT_ARRAY_BUFFER },
-    ],
-    accessors: [
-      { bufferView: 0, byteOffset: 0, componentType: FLOAT, count: vertexCount, type: "VEC3", min: minimum, max: maximum },
-      { bufferView: 0, byteOffset: 12, componentType: FLOAT, count: vertexCount, type: "VEC3" },
-      { bufferView: 0, byteOffset: 24, componentType: FLOAT, count: vertexCount, type: "VEC3" },
-      { bufferView: 0, byteOffset: 36, componentType: FLOAT, count: vertexCount, type: "SCALAR" },
-      { bufferView: 0, byteOffset: 40, componentType: FLOAT, count: vertexCount, type: "SCALAR" },
-      { bufferView: 1, byteOffset: 0, componentType: UNSIGNED_SHORT, count: indexCount, type: "SCALAR" },
-    ],
+    bufferViews,
+    accessors,
+    ...(animation ? { animations: [animation] } : {}),
   };
   return writeGlb(document, binary);
 }

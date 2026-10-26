@@ -16,6 +16,13 @@ const arrays = (asset) => ({
   indices: Array.from(asset.geometry.indices),
   stride: asset.geometry.stride,
 });
+const hasUnitNormals = (geometry) => {
+  for (let i = 0; i < geometry.vertices.length; i += geometry.stride) {
+    const length = Math.hypot(geometry.vertices[i + 3], geometry.vertices[i + 4], geometry.vertices[i + 5]);
+    if (!Number.isFinite(length) || Math.abs(length - 1) > 1e-3) return false;
+  }
+  return true;
+};
 
 test("built-in generators produce repeatable geometry from a type and seed", () => {
   assert.deepEqual(listAssetTypes(), ["bicycle", "car", "cat", "grove", "human", "rat", "rock", "rock-field", "tree", "water"]);
@@ -36,6 +43,7 @@ test("built-in generators produce repeatable geometry from a type and seed", () 
     assert.deepEqual(first.spec, second.spec, `${type} spec changed for a stable seed`);
     assert.deepEqual(arrays(first), arrays(second), `${type} mesh changed for a stable seed`);
     assert.ok(first.geometry.vertices.length / first.geometry.stride <= 65535, `${type} exceeds the 16-bit mesh budget`);
+    assert.ok(hasUnitNormals(first.geometry), `${type} has degenerate or non-unit vertex normals`);
     const rebuilt = rebuildAsset(serializeAsset(first));
     assert.deepEqual(rebuilt.spec, first.spec, `${type} spec changed after import`);
     assert.deepEqual(arrays(rebuilt), arrays(first), `${type} geometry changed after import`);
@@ -143,6 +151,40 @@ test("GLB export is standard, keeps shader channels, and rebuilds its portable a
   assert.deepEqual(imported.spec, asset.spec);
   assert.deepEqual(arrays(imported), arrays(asset));
   assert.throws(() => rebuildAssetFromGlb(bytes.subarray(0, bytes.length - 1)), /declared length/);
+});
+
+test("wind-driven assets export a repeatable glTF morph animation", () => {
+  const asset = createAsset("rat", "portable-scurrying-rat", { coat: "brown", size: 0.8 });
+  const bytes = new Uint8Array(exportAssetGlb(asset));
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const jsonLength = view.getUint32(12, true);
+  const document = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength)).trimEnd());
+  const primitive = document.meshes[0].primitives[0];
+  assert.equal(primitive.targets.length, 8);
+  assert.deepEqual(document.meshes[0].weights, Array(8).fill(0));
+  const animation = document.animations[0];
+  assert.equal(animation.name, "Tail sway");
+  assert.equal(animation.channels[0].target.path, "weights");
+  const sampler = animation.samplers[0];
+  assert.equal(sampler.interpolation, "LINEAR");
+  assert.equal(document.accessors[sampler.input].count, 9, "the last keyframe returns to the first pose");
+  assert.equal(document.accessors[sampler.output].count, 9 * primitive.targets.length);
+
+  const targetAccessor = document.accessors[primitive.targets[0].POSITION];
+  const targetView = document.bufferViews[targetAccessor.bufferView];
+  const binaryStart = 20 + jsonLength + 8;
+  const firstDelta = new DataView(bytes.buffer, bytes.byteOffset + binaryStart + targetView.byteOffset, targetView.byteLength);
+  let animatedVertex = -1;
+  for (let vertex = 0; vertex < asset.geometry.vertices.length / asset.geometry.stride; vertex++) {
+    if (asset.geometry.vertices[vertex * asset.geometry.stride + 9] > 0.2) {
+      animatedVertex = vertex;
+      break;
+    }
+  }
+  assert.ok(animatedVertex >= 0, "rat tail has shader wind weights");
+  const dx = firstDelta.getFloat32(animatedVertex * 12, true);
+  const dz = firstDelta.getFloat32(animatedVertex * 12 + 8, true);
+  assert.ok(Math.hypot(dx, dz) > 0, "the baked morph target carries wind displacement");
 });
 
 test("rock facets keep outward winding and per-face normals", () => {

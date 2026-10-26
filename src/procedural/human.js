@@ -56,7 +56,7 @@ function buildHair(style) {
       const b = point(t0, p1);
       const c = point(t1, p1);
       const d = point(t1, p0);
-      mesh.addFlatTriangle([a, b, c], WHITE, [0, -0.17, 0]);
+      if (ring > 0) mesh.addFlatTriangle([a, b, c], WHITE, [0, -0.17, 0]);
       mesh.addFlatTriangle([a, c, d], WHITE, [0, -0.17, 0]);
     }
   }
