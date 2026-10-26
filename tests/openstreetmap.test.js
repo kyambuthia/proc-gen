@@ -98,13 +98,6 @@ test("OSM ways become seeded, bounded meshes with portable attribution", () => {
   const terrainMesh = scene.meshes.terrain[0];
   const terrainVertex = terrainMesh.vertices;
   assert.ok(Math.abs(terrainVertex[1] - sampleTerrainHeight(scene.spec.terrain.seed, terrainVertex[0], terrainVertex[2], scene.spec.terrain.params)) < 1e-5);
-  const building = scene.spec.features.find((feature) => feature.kind === "building");
-  const buildingBox = createOsmObstacleBoxes(scene).find((box) => Math.abs(box.pos[0]) < 1 && Math.abs(box.pos[2]) < 1);
-  const buildingCenter = [
-    (Math.min(...building.polygon.map(([x]) => x)) + Math.max(...building.polygon.map(([x]) => x))) * 0.5,
-    (Math.min(...building.polygon.map(([, z]) => z)) + Math.max(...building.polygon.map(([, z]) => z))) * 0.5,
-  ];
-  assert.ok(Math.abs(buildingBox.pos[1] - sampleTerrainHeight(scene.spec.terrain.seed, ...buildingCenter, scene.spec.terrain.params) - building.height * 0.5) < 1e-5);
   let totalVertices = 0;
   for (const chunks of Object.values(scene.meshes)) {
     for (const mesh of chunks) {
@@ -159,6 +152,12 @@ test("small OSM scenes produce bounded building colliders for play", () => {
   assert.equal(obstacles.length, 1);
   assert.ok(obstacles[0].half[1] === 4);
   assert.ok(obstacles[0].half[0] > 0 && obstacles[0].half[2] > 0);
+  const building = scene.spec.features[0];
+  const buildingCenter = [
+    (Math.min(...building.polygon.map(([x]) => x)) + Math.max(...building.polygon.map(([x]) => x))) * 0.5,
+    (Math.min(...building.polygon.map(([, z]) => z)) + Math.max(...building.polygon.map(([, z]) => z))) * 0.5,
+  ];
+  assert.ok(Math.abs(obstacles[0].pos[1] - sampleTerrainHeight(scene.spec.terrain.seed, ...buildingCenter, scene.spec.terrain.params) - building.height * 0.5) < 1e-5);
   const navigation = createNav(obstacles);
   assert.equal(navigation.walkable(0, 0), false);
   assert.equal(navigation.findPath(-15, 0, 15, 0).partial, false);
