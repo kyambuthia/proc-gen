@@ -1,8 +1,8 @@
 # proc-gen
 
-A physics sandbox in the browser: active-ragdoll characters that walk, fight and fall over for
-real, NPCs that see, hear and decide what to do, and seeded procedural arenas. Built with React
-Three Fiber and the Jolt physics engine (WebAssembly).
+A playable procedural physics sandbox rendered with direct WebGL 2 and GLSL ES 3.00. It combines
+active-ragdoll characters, reactive NPCs, seeded arenas, and a vivid painterly shader. The same
+low-level graphics path is the foundation for procedural assets, motion, and generated worlds.
 
 ## Running it
 
@@ -17,10 +17,10 @@ gives the same layout. With no seed you get the hand-made classic arena.
 
 ## Direct graphics foundation
 
-With the dev server running, open `/graphics-lab.html` for the first raw WebGL 2 / GLSL ES 3.00
-rendering slice. It builds a deterministic grove from seeded geometry, merges it with the ground,
-and shades it in one draw call without texture lookups. This is the target renderer for the
-procedural-world work; the existing playable scene is being migrated in stages.
+The playable page and `/graphics-lab.html` both use the WebGL 2 API directly. The game batches
+ragdoll parts and scenery as instanced meshes; the lab builds a deterministic grove and ground as a
+single merged draw. Neither path uses a scene graph or texture lookups. The target is desktop and
+mobile hardware with OpenGL ES 3.0 class support.
 
 ## Controls
 
@@ -36,13 +36,15 @@ procedural-world work; the existing playable scene is being migrated in stages.
 | G | pick up / drop the ball |
 | B | put the ball in front of you |
 | R | go limp / get up |
-| T | swap between the active ragdoll and the animated figure |
 | E | add an NPC (sandbox only) |
 | H | make every NPC hostile |
 | V | wave mode on / off |
 | N | new random arena |
 | P | pause |
-| \` | debug view (hit shapes, centre of mass, capture point, foot targets, NPC minds) |
+| \` | toggle renderer and physics detail |
+
+On touch screens, use the virtual stick and on-screen action buttons. Drag the scene to orbit the
+camera and pinch or wheel to zoom.
 
 **Wave mode**: enemies arrive from the edges of the arena in growing waves, with a gunner added
 every other wave. Kills score 100 x the wave number (+50 for a head shot) and clearing a wave
@@ -64,7 +66,10 @@ civilians run away.
 | `src/arena.js` | Seeded arena generator (walls, blocks, stairs, pillars), rejecting layouts with unreachable areas |
 | `src/scenery.js` | The live obstacle list and ground-height helpers |
 | `src/waves.js` | Wave survival director: rosters, spawning, scoring, medkits |
-| `src/App.jsx` | Rendering, camera, input, HUD, minimap and combat feedback |
+| `src/raw-game.js` | Direct-render game loop, keyboard/touch controls, HUD, minimap, and combat |
+| `src/graphics/world-renderer.js` | Raw WebGL 2 batches for the playable scene |
+| `src/graphics/webgl2.js` | Shader compilation, GPU buffers, and instanced mesh upload |
+| `src/procedural/mesh-builder.js` | CPU mesh construction for boxes, ellipsoids, capsules, and merged assets |
 
 Each NPC brain returns the same `{ x, z, run, jump }` input the player produces, so a body does not
 know who is steering it. The game logic has no dependency on the renderer: the tests in `tests/`
@@ -72,6 +77,6 @@ run the real world, characters and brains headlessly in Node.
 
 ## Tests
 
-`npm test` runs the suite with Node's built-in test runner (about 15 seconds). It covers the ray
+`npm test` runs the suite with Node's built-in test runner. It covers the ray
 maths, path validity, arena generation, character stability and walking, gunner behaviour,
 flanking, and the wave director.

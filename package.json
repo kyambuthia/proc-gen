@@ -1,13 +1,8 @@
 {
   "dependencies": {
-    "@react-three/fiber": "^9.8.2",
-    "jolt-physics": "^1.1.0",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "three": "^0.186.1"
+    "jolt-physics": "^1.1.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^6.1.2",
     "vite": "^8.3.4"
   },
   "type": "module",

@@ -135,12 +135,19 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
     for (const character of world.characters) {
       const role = character.kind === "player" ? "player" : character.brain?.personality.role ?? "brawler";
       const baseTint = ROLE_TINT[role] ?? ROLE_TINT.brawler;
-      const tint = character.state.flash > 0 ? mix(baseTint, [1, 0.28, 0.16], Math.min(1, character.state.flash * 4)) : baseTint;
       for (const part of character.ragdoll.parts) {
         if (part.dead) continue;
         const shape = shapeFor(part);
         const position = joltVec3(part.body.GetPosition());
         const rotation = joltQuat(part.body.GetRotation());
+        const base = character.state.mode === "dead"
+          ? [0.34, 0.36, 0.39]
+          : part.name === "head"
+            ? [0.92, 0.65, 0.43]
+            : baseTint;
+        const tint = character.state.flash > 0
+          ? mix(base, [1, 0.28, 0.16], Math.min(1, character.state.flash * 4))
+          : base;
         add(shape.mesh, transform4(position, rotation, shape.scale), tint);
       }
     }

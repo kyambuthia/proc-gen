@@ -1,4 +1,5 @@
-import { createRoot } from "react-dom/client";
-import App from "./App.jsx";
+import { startGame } from "./raw-game.js";
 
-createRoot(document.getElementById("root")).render(<App />);
+let stop = () => {};
+startGame().then((dispose) => { stop = dispose; });
+window.addEventListener("pagehide", () => stop(), { once: true });

@@ -2,9 +2,9 @@
 
 ## Rendering target
 
-The browser renderer is being rebuilt around the WebGL 2 API and GLSL ES 3.00 directly. WebGL 2 exposes much of OpenGL ES 3.0, which is the shared browser target for desktop and mobile. React may remain for menus and accessible controls, but rendering code must not depend on Three.js or React Three Fiber.
+The browser renderer uses the WebGL 2 API and GLSL ES 3.00 directly. WebGL 2 exposes much of OpenGL ES 3.0, which is the shared browser target for desktop and mobile. Rendering and the playable page do not depend on Three.js, React Three Fiber, or a scene graph.
 
-The first vertical slice is available at `/graphics-lab.html`: deterministic tree geometry, a merged ground-and-grove mesh, a compact painterly shader, and direct GPU buffer/program management. It uses no textures and keeps the scene to one draw call.
+The first vertical slice is available at `/graphics-lab.html`: deterministic tree geometry, a merged ground-and-grove mesh, a compact painterly shader, and direct GPU buffer/program management. The playable page now uses the same renderer, with instanced meshes for ragdoll bodies and scenery. It uses no textures.
 
 ## Asset contract
 
@@ -18,7 +18,7 @@ The baseline material uses vertex colors, faceted normals, quantized diffuse ban
 
 ## Simulation contract
 
-Physics remains independent of rendering. Asset definitions provide simplified collision proxies; render geometry is never used as a physics mesh by default. Motion can be shader-driven for wind and CPU/physics-driven for articulated or rigid bodies. The existing Jolt world and gameplay controllers remain separate from the new renderer during migration.
+Physics remains independent of rendering. Asset definitions provide simplified collision proxies; render geometry is never used as a physics mesh by default. Motion can be shader-driven for wind and CPU/physics-driven for articulated or rigid bodies. The Jolt world and gameplay controllers remain separate from the direct renderer.
 
 ## Build sequence
 
@@ -26,7 +26,7 @@ Physics remains independent of rendering. Asset definitions provide simplified c
 2. Reusable primitive library and asset registry; add rocks, grass, and water with budget profiles.
 3. Procedural rigs and motion definitions for people and animals; Jolt collider profiles.
 4. Vehicle generators and wheel/steering motion.
-5. Replace the current React Three Fiber presentation with the direct renderer while preserving the playable simulation.
+5. Expand procedural rigs, actors, props, and environment motion while preserving low-end GPU budgets.
 6. Add an OpenStreetMap data adapter, world-feature conversion, attribution, and portable scene/asset export.
 
 OpenStreetMap data and tile services are separate concerns: the world pipeline should consume map data through a provider adapter and display required attribution. It must not assume the community raster tile server is an offline download source.
