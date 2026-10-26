@@ -105,6 +105,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
   let lost = false;
   let decorations = null;
   let osmMeshes = [];
+  let hasOsmTerrain = false;
   const motionPreference = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   const onContextLost = (event) => {
     event.preventDefault();
@@ -201,6 +202,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
     }
     for (const mesh of osmMeshes) mesh.dispose();
     osmMeshes = nextMeshes;
+    hasOsmTerrain = !!scene?.spec?.terrain && (scene?.meshes?.terrain?.length ?? 0) > 0;
   }
 
   function render(world, game, now) {
@@ -259,7 +261,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
 
     const ballPosition = world.ball.position();
     add(sphere, transform4(ballPosition, [0, 0, 0, 1], [world.ball.radius, world.ball.radius, world.ball.radius]), [0.96, 0.42, 0.17]);
-    add(floor, transform4([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]), WHITE);
+    if (!hasOsmTerrain) add(floor, transform4([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]), WHITE);
     if (!hasOsmScene) {
       add(grove, transform4([25, 0, -19], [0, 0, 0, 1], [1, 1, 1]), WHITE);
       add(grove, transform4([-25, 0, 19], [0, 1, 0, 0], [1, 1, 1]), WHITE);

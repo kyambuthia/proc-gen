@@ -3,6 +3,7 @@ import { createCharacter } from "./character.js";
 import { OBSTACLES, setObstacles as replaceObstacles } from "./scenery.js";
 import { qRot, rayVsBox, rayVsCapsule, rayVsSphere } from "./math.js";
 import { HUMANOID_FOOT_LIFT, HUMANOID_JOINTS as JOINTS, HUMANOID_PARTS as PARTS, SIDE, UP } from "./procedural/humanoid-rig.js";
+import { sampleTerrainHeight } from "./procedural/terrain.js";
 
 const LAYER_STATIC = 0;
 const LAYER_RAGDOLL = 1;
@@ -26,6 +27,24 @@ const GRAVITY = -20;
 const WALK_SPEED = 2.6;
 const RUN_SPEED = 6.5;
 const JUMP_SPEED = 7;
+const HEIGHTFIELD_SAMPLES = 64;
+
+function normalizeTerrainRecipe(input) {
+  if (input == null) return null;
+  const terrain = input.spec ?? input;
+  if (terrain.type !== undefined && terrain.type !== "terrain") throw new TypeError("World terrain must be a terrain asset spec");
+  if (!Number.isInteger(terrain.seed) || terrain.seed < 0 || terrain.seed > 0xffffffff || !terrain.params || typeof terrain.params !== "object") {
+    throw new TypeError("World terrain needs a uint32 seed and parameter object");
+  }
+  const { width = 48, depth = 48, resolution = 56, biome = "meadow", amplitude = 1 } = terrain.params;
+  if (!Number.isFinite(width) || width <= 0 || width > 512 || !Number.isFinite(depth) || depth <= 0 || depth > 512) {
+    throw new RangeError("World terrain dimensions must be positive and no larger than 512 metres");
+  }
+  if (!Number.isInteger(resolution) || resolution < 8 || resolution > 104) throw new RangeError("World terrain resolution must be an integer from 8 to 104");
+  if (!Number.isFinite(amplitude) || amplitude <= 0 || amplitude > 3) throw new RangeError("World terrain amplitude must be between 0 and 3");
+  if (!["meadow", "autumn", "highland"].includes(biome)) throw new RangeError("World terrain has an unknown biome");
+  return { type: "terrain", seed: terrain.seed >>> 0, params: { width, depth, resolution, biome, amplitude } };
+}
 
 export async function createWorld() {
   const Jolt = await initJolt();
@@ -75,17 +94,75 @@ export async function createWorld() {
 
   const vec = (v) => new Jolt.Vec3(v[0], v[1], v[2]);
   const rvec = (v) => new Jolt.RVec3(v[0], v[1], v[2]);
+  let terrainRecipe = null;
+  const terrainHeightAt = (x, z) => terrainRecipe ? sampleTerrainHeight(terrainRecipe.seed, x, z, terrainRecipe.params) : 0;
 
-  const floor = bodies.CreateBody(
-    new Jolt.BodyCreationSettings(
-      new Jolt.BoxShape(new Jolt.Vec3(50, 0.5, 50)),
-      new Jolt.RVec3(0, -0.5, 0),
-      new Jolt.Quat(0, 0, 0, 1),
-      Jolt.EMotionType_Static,
-      LAYER_STATIC,
-    ),
-  );
-  bodies.AddBody(floor.GetID(), Jolt.EActivation_DontActivate);
+  const createFlatFloor = () => {
+    const body = bodies.CreateBody(
+      new Jolt.BodyCreationSettings(
+        new Jolt.BoxShape(new Jolt.Vec3(50, 0.5, 50)),
+        new Jolt.RVec3(0, -0.5, 0),
+        new Jolt.Quat(0, 0, 0, 1),
+        Jolt.EMotionType_Static,
+        LAYER_STATIC,
+      ),
+    );
+    bodies.AddBody(body.GetID(), Jolt.EActivation_DontActivate);
+    return body;
+  };
+  const createTerrainFloor = (terrain) => {
+    const settings = new Jolt.HeightFieldShapeSettings();
+    const samples = new Jolt.ArrayFloat();
+    let result = null;
+    let bodySettings = null;
+    let body = null;
+    try {
+      const sampleCount = HEIGHTFIELD_SAMPLES;
+      const { width, depth } = terrain.params;
+      const xStep = width / (sampleCount - 1);
+      const zStep = depth / (sampleCount - 1);
+      samples.reserve(sampleCount * sampleCount);
+      for (let z = 0; z < sampleCount; z++) {
+        const worldZ = -depth * 0.5 + z * zStep;
+        for (let x = 0; x < sampleCount; x++) {
+          const worldX = -width * 0.5 + x * xStep;
+          samples.push_back(sampleTerrainHeight(terrain.seed, worldX, worldZ, terrain.params));
+        }
+      }
+      settings.mSampleCount = sampleCount;
+      settings.mBlockSize = 2;
+      settings.mBitsPerSample = 16;
+      settings.mOffset = vec([-width * 0.5, 0, -depth * 0.5]);
+      settings.mScale = vec([xStep, 1, zStep]);
+      settings.mHeightSamples = samples;
+      result = settings.Create();
+      if (!result.IsValid()) throw new Error("Jolt could not build the terrain heightfield");
+      const shape = result.Get();
+      bodySettings = new Jolt.BodyCreationSettings(
+        shape,
+        rvec([0, 0, 0]),
+        new Jolt.Quat(0, 0, 0, 1),
+        Jolt.EMotionType_Static,
+        LAYER_STATIC,
+      );
+      body = bodies.CreateBody(bodySettings);
+      if (!body) throw new Error("Jolt could not allocate the terrain body");
+      bodies.AddBody(body.GetID(), Jolt.EActivation_DontActivate);
+      return body;
+    } catch (error) {
+      if (body) {
+        bodies.RemoveBody(body.GetID());
+        bodies.DestroyBody(body.GetID());
+      }
+      throw error;
+    } finally {
+      if (bodySettings) Jolt.destroy(bodySettings);
+      if (result) Jolt.destroy(result);
+      Jolt.destroy(settings);
+      Jolt.destroy(samples);
+    }
+  };
+  let floorBody = createFlatFloor();
 
   const obstacleBodies = [];
   const addObstacleBody = (obstacle) => {
@@ -164,12 +241,15 @@ export async function createWorld() {
       ballPoint.Set(spin[0], spin[1], spin[2]);
       bodies.SetLinearAndAngularVelocity(ballBody.GetID(), ballVec, ballPoint);
     },
-    reset(at = BALL.spawn) {
+    reset(at = null) {
       if (ball.holder) {
         ball.holder.drop?.();
         ball.holder = null;
       }
-      ballPoint.Set(at[0], at[1], at[2]);
+      const target = at ?? (terrainRecipe
+        ? [BALL.spawn[0], terrainHeightAt(BALL.spawn[0], BALL.spawn[2]) + BALL.radius + 0.02, BALL.spawn[2]]
+        : BALL.spawn);
+      ballPoint.Set(target[0], target[1], target[2]);
       bodies.SetPositionAndRotation(ballBody.GetID(), ballPoint, new Jolt.Quat(0, 0, 0, 1), Jolt.EActivation_Activate);
       ballVec.Set(0, 0, 0);
       bodies.SetLinearAndAngularVelocity(ballBody.GetID(), ballVec, ballVec);
@@ -360,7 +440,19 @@ export async function createWorld() {
 
   // ---------------------------------------------------------------- characters and ray casts
 
-  const world = { characters: [], ball, obstacles: OBSTACLES, ctx: { Jolt, bodies, physics } };
+  const world = { characters: [], ball, obstacles: OBSTACLES, terrain: null, terrainHeightAt, ctx: { Jolt, bodies, physics } };
+
+  world.setTerrain = (input) => {
+    const nextTerrain = normalizeTerrainRecipe(input);
+    const nextFloor = nextTerrain ? createTerrainFloor(nextTerrain) : createFlatFloor();
+    bodies.RemoveBody(floorBody.GetID());
+    bodies.DestroyBody(floorBody.GetID());
+    floorBody = nextFloor;
+    terrainRecipe = nextTerrain;
+    world.terrain = nextTerrain;
+    ball.reset();
+    return world.terrain;
+  };
 
   world.setObstacles = (list) => {
     if (!Array.isArray(list) || list.length > 2048 || list.some((obstacle) =>
@@ -425,7 +517,35 @@ export async function createWorld() {
         best = { dist: t, point: [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t], ...extra };
       }
     };
-    if (d[1] < -1e-6) consider(-o[1] / d[1], { kind: "scenery" });
+    if (!terrainRecipe && d[1] < -1e-6) consider(-o[1] / d[1], { kind: "scenery" });
+    else if (terrainRecipe && maxDist > 0) {
+      const signedDistance = (t) => {
+        const x = o[0] + d[0] * t;
+        const z = o[2] + d[2] * t;
+        if (Math.abs(x) > terrainRecipe.params.width * 0.5 || Math.abs(z) > terrainRecipe.params.depth * 0.5) return Infinity;
+        return o[1] + d[1] * t - terrainHeightAt(x, z);
+      };
+      let previousT = 0;
+      let previous = signedDistance(0);
+      const steps = Math.max(1, Math.ceil(maxDist));
+      for (let step = 1; step <= steps; step++) {
+        const t = (maxDist * step) / steps;
+        const current = signedDistance(t);
+        if (previous >= 0 && current <= 0) {
+          let low = previousT;
+          let high = t;
+          for (let i = 0; i < 12; i++) {
+            const mid = (low + high) * 0.5;
+            if (signedDistance(mid) > 0) low = mid;
+            else high = mid;
+          }
+          consider((low + high) * 0.5, { kind: "scenery" });
+          break;
+        }
+        previousT = t;
+        previous = current;
+      }
+    }
     for (const box of OBSTACLES) consider(rayVsBox(o, d, box.pos, [0, 0, 0, 1], box.half), { kind: "scenery" });
     if (sceneryOnly) return best;
     consider(rayVsSphere(o, d, ball.position(), ball.radius), { kind: "ball" });

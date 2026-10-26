@@ -84,3 +84,13 @@ test("sparse obstacle rasterization matches the full cell-grid reference", () =>
     }
   }
 });
+
+test("terrain samples initialize navigation heights and keep gentle slopes walkable", () => {
+  const terrainHeightAt = (x, z) => x * 0.08 + z * 0.03;
+  const grid = createNav([], terrainHeightAt);
+  assert.ok(Math.abs(grid.heightAt(0, 0) - terrainHeightAt(0.25, 0.25)) < 1e-5);
+  const path = grid.findPath(-8, -4, 8, 4);
+  assert.equal(path.partial, false);
+  assert.ok(path.nodes.at(-1).h > path.nodes[0].h);
+  assert.throws(() => createNav([], () => NaN), /non-finite height/);
+});

@@ -71,13 +71,26 @@ class Heap {
   }
 }
 
-export function createNav(obstacles = OBSTACLES) {
+export function createNav(obstacles = OBSTACLES, terrainHeightAt = null) {
+  if (terrainHeightAt !== null && typeof terrainHeightAt !== "function") {
+    throw new TypeError("Navigation terrain height must be a function or null");
+  }
   const height = new Float32Array(N * N);
   const blocked = new Uint8Array(N * N);
   const penalty = new Float32Array(N * N);
   const cellX = (ix) => -HALF + (ix + 0.5) * CELL;
   const cellOf = (x) => Math.floor((x + HALF) / CELL);
   const inGrid = (ix, iz) => ix >= 0 && iz >= 0 && ix < N && iz < N;
+
+  if (terrainHeightAt) {
+    for (let iz = 0; iz < N; iz++) {
+      for (let ix = 0; ix < N; ix++) {
+        const surface = terrainHeightAt(cellX(ix), cellX(iz));
+        if (!Number.isFinite(surface)) throw new TypeError("Navigation terrain returned a non-finite height");
+        height[ix + iz * N] = surface;
+      }
+    }
+  }
 
   // Rasterize only cells touched by each obstacle. The old cell × obstacle scan became costly
   // for imported OSM blocks, where a small patch can contain hundreds of building footprints.
@@ -350,7 +363,7 @@ export function createNav(obstacles = OBSTACLES) {
 // The shared grid. Its methods are swapped in place when the arena changes, so modules that
 // imported `nav` keep working.
 export const nav = {};
-export function rebuildNav(obstacles = OBSTACLES) {
-  return Object.assign(nav, createNav(obstacles));
+export function rebuildNav(obstacles = OBSTACLES, terrainHeightAt = null) {
+  return Object.assign(nav, createNav(obstacles, terrainHeightAt));
 }
 rebuildNav();

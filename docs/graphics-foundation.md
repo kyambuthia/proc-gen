@@ -12,7 +12,7 @@ An asset is described by a serializable specification containing its type, schem
 
 The cat tail currently uses the shared wind displacement in the vertex shader. The car is a static scene prop for now; its wheel layout, steering axis, and collider spec are ready for the vehicle physics controller increment.
 
-The OSM compiler now groups seeded tree species into loose habitat patches and adds wind-weighted grasses, ferns, shrubs, and flowers within mapped park, grass, and forest polygons. It clears vegetation around building buffers and mapped road and waterway corridors. Character movement and building collision still use a flat ground plane; terrain heightfields need a matching physics and navigation path.
+New OSM scenes carry a portable seeded terrain recipe and mesh. Roads, green spaces, buildings, trees, groundcover, and rats follow that surface; building colliders sit at the sampled ground height. Jolt uses a compact static heightfield, and navigation samples the same terrain function to account for steps and slopes. The generated elevation is an art-directed procedural layer; importing measured real-world elevation remains a separate provider task.
 
 Generators use stable seed derivation rather than global `Math.random()`. Repeated instances are merged or batched by geometry where practical. Each uploaded mesh currently uses 16-bit indices and rejects more than 65,535 vertices; larger scenes must be split into batches. Low-end profiles should reduce instance count, mesh subdivisions, and render resolution before changing the art direction.
 

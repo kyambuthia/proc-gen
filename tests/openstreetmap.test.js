@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createNav } from "../src/nav.js";
 import { SURFACE_WATER } from "../src/procedural/mesh-builder.js";
+import { sampleTerrainHeight } from "../src/procedural/terrain.js";
 import {
   createOsmScene,
   createOsmObstacleBoxes,
@@ -81,6 +82,8 @@ test("OSM ways become seeded, bounded meshes with portable attribution", () => {
   assert.equal(scene.spec.source.attribution, "© OpenStreetMap contributors");
   assert.equal(scene.spec.source.license, "ODbL-1.0");
   assert.equal(scene.spec.source.dataTimestamp, "2026-01-02T03:04:05Z");
+  assert.equal(scene.spec.terrain.type, "terrain");
+  assert.ok(scene.meshes.terrain.length > 0, "mapped scenes include a portable terrain mesh");
   assert.equal(scene.spec.features.find((feature) => feature.kind === "building").height, 6.2);
   assert.ok(scene.meshes.roads.length > 0);
   assert.ok(scene.meshes.buildings.length > 0);
@@ -92,6 +95,16 @@ test("OSM ways become seeded, bounded meshes with portable attribution", () => {
       assert.equal(mesh.vertices[i + 10], SURFACE_WATER, "mapped water must use the animated water shader path");
     }
   }
+  const terrainMesh = scene.meshes.terrain[0];
+  const terrainVertex = terrainMesh.vertices;
+  assert.ok(Math.abs(terrainVertex[1] - sampleTerrainHeight(scene.spec.terrain.seed, terrainVertex[0], terrainVertex[2], scene.spec.terrain.params)) < 1e-5);
+  const building = scene.spec.features.find((feature) => feature.kind === "building");
+  const buildingBox = createOsmObstacleBoxes(scene).find((box) => Math.abs(box.pos[0]) < 1 && Math.abs(box.pos[2]) < 1);
+  const buildingCenter = [
+    (Math.min(...building.polygon.map(([x]) => x)) + Math.max(...building.polygon.map(([x]) => x))) * 0.5,
+    (Math.min(...building.polygon.map(([, z]) => z)) + Math.max(...building.polygon.map(([, z]) => z))) * 0.5,
+  ];
+  assert.ok(Math.abs(buildingBox.pos[1] - sampleTerrainHeight(scene.spec.terrain.seed, ...buildingCenter, scene.spec.terrain.params) - building.height * 0.5) < 1e-5);
   let totalVertices = 0;
   for (const chunks of Object.values(scene.meshes)) {
     for (const mesh of chunks) {
@@ -109,6 +122,7 @@ test("OSM ways become seeded, bounded meshes with portable attribution", () => {
   const rebuilt = rebuildOsmScene(serialized);
   assert.deepEqual(rebuilt.spec, scene.spec);
   assert.deepEqual(meshArrays(rebuilt.meshes), meshArrays(scene.meshes));
+  assert.equal(createOsmScene(sampleResponse(), { bounds, seed: "flat", terrain: false }).spec.terrain, null);
 });
 
 test("feature limits count only supported, in-bounds ways", () => {

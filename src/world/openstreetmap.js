@@ -2,6 +2,7 @@ import { MeshBuilder, SURFACE_DEFAULT, SURFACE_WATER } from "../procedural/mesh-
 import { createRng, hashSeed } from "../procedural/seed.js";
 import { createAsset } from "../procedural/assets.js";
 import { TREE_VARIANTS } from "../procedural/tree.js";
+import { sampleTerrainHeight } from "../procedural/terrain.js";
 
 const METERS_PER_LATITUDE_DEGREE = 111132;
 const MAX_SCENE_VERTICES = 60000;
@@ -499,7 +500,16 @@ function drawAreaMesh(mesh, feature, seed) {
   }
 }
 
-function compileMeshes(features, seed) {
+function conformToTerrain(chunks, terrain) {
+  if (!terrain) return;
+  for (const geometry of chunks) {
+    for (let i = 0; i < geometry.vertices.length; i += geometry.stride) {
+      geometry.vertices[i + 1] += sampleTerrainHeight(terrain.seed, geometry.vertices[i], geometry.vertices[i + 2], terrain.params);
+    }
+  }
+}
+
+function compileMeshes(features, seed, terrain = null) {
   const budget = { vertices: 0 };
   const roads = features.filter((feature) => feature.kind === "road");
   const waterways = features.filter((feature) => feature.kind === "waterway");
@@ -507,15 +517,29 @@ function compileMeshes(features, seed) {
   const water = features.filter((feature) => feature.kind === "water");
   const buildings = features.filter((feature) => feature.kind === "building");
   const meshes = {
-    roads: geometryChunks(roads, drawLineMesh, budget),
-    waterways: geometryChunks(waterways, drawLineMesh, budget),
-    greenery: geometryChunks(greenery, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget),
-    water: geometryChunks(water, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget),
-    buildings: geometryChunks(buildings, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget),
+    terrain: [],
+    roads: [],
+    waterways: [],
+    greenery: [],
+    water: [],
+    buildings: [],
     trees: [],
     groundcover: [],
     rats: [],
   };
+  if (terrain) {
+    const geometry = createAsset("terrain", terrain.seed, terrain.params).geometry;
+    const vertices = geometry.vertices.length / geometry.stride;
+    if (vertices > MAX_SCENE_VERTICES) throw new RangeError("OSM terrain exceeds the mesh budget");
+    budget.vertices += vertices;
+    meshes.terrain.push(geometry);
+  }
+  meshes.roads = geometryChunks(roads, drawLineMesh, budget);
+  meshes.waterways = geometryChunks(waterways, drawLineMesh, budget);
+  meshes.greenery = geometryChunks(greenery, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget);
+  meshes.water = geometryChunks(water, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget);
+  meshes.buildings = geometryChunks(buildings, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget);
+  for (const key of ["roads", "waterways", "greenery", "water", "buildings"]) conformToTerrain(meshes[key], terrain);
   if (!greenery.length || budget.vertices >= MAX_TOTAL_SCENE_VERTICES) return meshes;
 
   const occupiedByBuildings = buildings.map((feature) => {
@@ -596,7 +620,8 @@ function compileMeshes(features, seed) {
       }
       const angle = random() * Math.PI * 2;
       const scale = 0.58 + random() * 0.52;
-      appendRotated(mergedTrees, tree.geometry, [point[0], 0, point[1]], angle, scale);
+      const ground = terrain ? sampleTerrainHeight(terrain.seed, point[0], point[1], terrain.params) : 0;
+      appendRotated(mergedTrees, tree.geometry, [point[0], ground, point[1]], angle, scale);
       treeLocations.push(point);
       treeCount++;
       placedInFeature++;
@@ -641,6 +666,8 @@ function compileMeshes(features, seed) {
       origin: [(minX + maxX) * 0.5, (minZ + maxZ) * 0.5],
       areas: [feature.polygon],
       treePositions: treeLocations.map(([x, z]) => [x, 0, z, 0.8]),
+      terrainSeed: terrain?.seed ?? null,
+      terrainParams: terrain?.params ?? {},
       exclusions: occupiedByBuildings,
       avoidPaths: nearbyPaths,
     });
@@ -678,7 +705,8 @@ function compileMeshes(features, seed) {
           ratBudgetFull = true;
           break;
         }
-        appendRotated(mergedRats, rat.geometry, [point[0], 0, point[1]], random() * Math.PI * 2);
+        const ground = terrain ? sampleTerrainHeight(terrain.seed, point[0], point[1], terrain.params) : 0;
+        appendRotated(mergedRats, rat.geometry, [point[0], ground, point[1]], random() * Math.PI * 2);
         ratLocations.push(point);
         ratCount++;
       }
@@ -752,6 +780,19 @@ function validateSceneSpec(spec) {
   validateOsmBounds(spec.bounds);
   if (spec.features.length > MAX_FEATURES) throw new RangeError(`OSM scene exceeds the ${MAX_FEATURES} feature limit`);
   if (!Number.isInteger(spec.seed) || spec.seed < 0 || spec.seed > 0xffffffff) throw new TypeError("OSM scene seed must be a uint32");
+  if (spec.terrain !== undefined && spec.terrain !== null) {
+    const terrain = spec.terrain;
+    if (!terrain || terrain.type !== "terrain" || !Number.isInteger(terrain.seed) || terrain.seed < 0 || terrain.seed > 0xffffffff || !terrain.params || typeof terrain.params !== "object") {
+      throw new TypeError("OSM scene terrain must contain a terrain seed and parameters");
+    }
+    const { width, depth, resolution, biome, amplitude } = terrain.params;
+    if (!Number.isFinite(width) || width < MAX_PLAYABLE_EXTENT_METERS || width > 128 || !Number.isFinite(depth) || depth < MAX_PLAYABLE_EXTENT_METERS || depth > 128) {
+      throw new RangeError(`OSM terrain must cover at least ${MAX_PLAYABLE_EXTENT_METERS} metres and stay within 128 metres`);
+    }
+    if (!Number.isInteger(resolution) || resolution < 8 || resolution > 100 || !["meadow", "autumn", "highland"].includes(biome) || !Number.isFinite(amplitude) || amplitude <= 0 || amplitude > 3) {
+      throw new TypeError("OSM scene terrain has invalid generation parameters");
+    }
+  }
   if (!Array.isArray(spec.center) || spec.center.length !== 2 || !spec.center.every(Number.isFinite)) throw new TypeError("OSM scene center must contain two finite coordinates");
   if (!spec.source || spec.source.name !== "OpenStreetMap" || spec.source.license !== LICENSE || spec.source.attribution !== ATTRIBUTION || spec.source.attributionUrl !== ATTRIBUTION_URL) {
     throw new TypeError("OSM scene is missing its OpenStreetMap attribution metadata");
@@ -814,21 +855,37 @@ export function createOsmObstacleBoxes(input) {
     const maxZ = Math.max(...zs);
     const halfX = Math.max(0.25, (maxX - minX) * 0.5);
     const halfZ = Math.max(0.25, (maxZ - minZ) * 0.5);
+    const centerX = (minX + maxX) * 0.5;
+    const centerZ = (minZ + maxZ) * 0.5;
+    const terrainY = spec.terrain ? sampleTerrainHeight(spec.terrain.seed, centerX, centerZ, spec.terrain.params) : 0;
     return {
-      pos: [(minX + maxX) * 0.5, feature.height * 0.5, (minZ + maxZ) * 0.5],
+      pos: [centerX, terrainY + feature.height * 0.5, centerZ],
       half: [halfX, feature.height * 0.5, halfZ],
     };
   });
 }
 
-export function createOsmScene(data, { bounds = null, seed = 0, maxFeatures = MAX_FEATURES } = {}) {
+export function createOsmScene(data, { bounds = null, seed = 0, maxFeatures = MAX_FEATURES, terrain = true } = {}) {
   if (!data || !Array.isArray(data.elements)) throw new TypeError("Expected an Overpass JSON response with an elements array");
   if (!Number.isInteger(maxFeatures) || maxFeatures < 1 || maxFeatures > MAX_FEATURES) throw new RangeError(`maxFeatures must be between 1 and ${MAX_FEATURES}`);
   const normalized = normalizedFeatures(data, bounds, maxFeatures);
+  const sceneSeed = hashSeed(seed);
+  const terrainOptions = terrain && typeof terrain === "object" ? terrain : {};
+  const terrainSpec = terrain ? {
+    type: "terrain",
+    seed: deriveFeatureSeed(sceneSeed, "world-terrain"),
+    params: {
+      width: terrainOptions.width ?? 60,
+      depth: terrainOptions.depth ?? 60,
+      resolution: terrainOptions.resolution ?? 40,
+      biome: terrainOptions.biome ?? "meadow",
+      amplitude: terrainOptions.amplitude ?? 0.32,
+    },
+  } : null;
   const spec = {
     type: "osm-scene",
     version: 1,
-    seed: hashSeed(seed),
+    seed: sceneSeed,
     bounds: normalized.bounds,
     center: normalized.center,
     source: {
@@ -839,10 +896,11 @@ export function createOsmScene(data, { bounds = null, seed = 0, maxFeatures = MA
       dataTimestamp: normalized.sourceTimestamp,
       copyright: data.osm3s?.copyright ?? null,
     },
+    terrain: terrainSpec,
     features: normalized.features,
   };
   validateSceneSpec(spec);
-  return { spec, meshes: compileMeshes(spec.features, spec.seed) };
+  return { spec, meshes: compileMeshes(spec.features, spec.seed, spec.terrain) };
 }
 
 export function serializeOsmScene(scene, space = 0) {
@@ -852,5 +910,5 @@ export function serializeOsmScene(scene, space = 0) {
 export function rebuildOsmScene(input) {
   const spec = validateSceneSpec(typeof input === "string" ? JSON.parse(input) : input);
   const clone = JSON.parse(JSON.stringify(spec));
-  return { spec: clone, meshes: compileMeshes(clone.features, clone.seed) };
+  return { spec: clone, meshes: compileMeshes(clone.features, clone.seed, clone.terrain ?? null) };
 }

@@ -145,7 +145,7 @@ export async function startGame() {
     return character;
   };
   const spawnNpc = (role, [x, z], yaw = Math.random() * Math.PI * 2) => {
-    const character = spawn([x, RAGDOLL_FOOT_OFFSET + 0.02, z], {
+    const character = spawn([x, world.terrainHeightAt(x, z) + RAGDOLL_FOOT_OFFSET + 0.02, z], {
       kind: "npc",
       name: `${role} ${nextId}`,
       yaw,
@@ -155,7 +155,7 @@ export async function startGame() {
     character.brain = createBrain(character, world, { origin: [x, z], role });
     return character;
   };
-  game.hero = spawn([0, RAGDOLL_FOOT_OFFSET + 0.02, 4], { kind: "player", yaw: Math.PI });
+  game.hero = spawn([0, world.terrainHeightAt(0, 4) + RAGDOLL_FOOT_OFFSET + 0.02, 4], { kind: "player", yaw: Math.PI });
   game.npcs = NPC_SPAWNS.map(({ at, role }) => spawnNpc(role, at));
   game.waves = createWaveDirector({
     world,
@@ -195,29 +195,34 @@ export async function startGame() {
   }
 
   function activateOsmScene(scene) {
-    if (!Object.values(scene.meshes).some((chunks) => chunks.length)) {
+    if (!Object.entries(scene.meshes).some(([kind, chunks]) => kind !== "terrain" && chunks.length)) {
       throw new Error("This OSM scene has no supported roads, water, green space, or buildings");
     }
     const obstacles = createOsmObstacleBoxes(scene);
     const previousObstacles = world.obstacles.map((obstacle) => ({ pos: [...obstacle.pos], half: [...obstacle.half] }));
+    const previousTerrain = world.terrain;
     let spawns;
     try {
+      world.setTerrain(scene.spec.terrain ?? null);
       world.setObstacles(obstacles);
-      rebuildNav();
+      rebuildNav(obstacles, world.terrainHeightAt);
       spawns = findMapSpawns();
       renderer.setOsmScene(scene);
     } catch (error) {
+      world.setTerrain(previousTerrain);
       world.setObstacles(previousObstacles);
-      rebuildNav();
+      rebuildNav(previousObstacles, world.terrainHeightAt);
       throw error;
     }
 
     game.waves.stop();
     for (const character of [...world.characters]) world.removeCharacter(character);
     game.npcs.length = 0;
-    game.hero = spawn([spawns[0][0], RAGDOLL_FOOT_OFFSET + 0.02, spawns[0][1]], { kind: "player", yaw: Math.PI });
+    game.hero = spawn([spawns[0][0], world.terrainHeightAt(spawns[0][0], spawns[0][1]) + RAGDOLL_FOOT_OFFSET + 0.02, spawns[0][1]], { kind: "player", yaw: Math.PI });
     game.npcs = NPC_SPAWNS.map(({ role }, index) => spawnNpc(role, spawns[index + 1]));
-    world.ball.reset([spawns[0][0] + 1.4, 0.6, spawns[0][1] + 1.4]);
+    const ballX = spawns[0][0] + 1.4;
+    const ballZ = spawns[0][1] + 1.4;
+    world.ball.reset([ballX, world.terrainHeightAt(ballX, ballZ) + world.ball.radius + 0.02, ballZ]);
     game.osmScene = scene;
     game.event = `Playing ${scene.spec.features.length} mapped features`;
     game.accumulator = 0;
