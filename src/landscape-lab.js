@@ -2,6 +2,7 @@ import { lookAt, multiply4, perspective } from "./graphics/matrix.js";
 import { FRAGMENT_SHADER, VERTEX_SHADER } from "./graphics/painterly-shader.js";
 import { compileProgram, uploadMesh } from "./graphics/webgl2.js";
 import { createAsset } from "./procedural/assets.js";
+import { sampleTerrainHeight } from "./procedural/terrain.js";
 
 const canvas = document.querySelector("#view");
 const seedInput = document.querySelector("#seed");
@@ -45,6 +46,7 @@ let program;
 let terrainMesh;
 let treesMesh;
 let coverMesh;
+let riverMesh;
 let animationFrame = 0;
 let disposed = false;
 let yaw = 0.76;
@@ -60,12 +62,14 @@ function setStatus(message, isError = false) {
 function growLandscape() {
   if (!gl) return;
   button.disabled = true;
-  setStatus("Growing terrain, species patches, and groundcover…");
+  setStatus("Growing terrain, species patches, groundcover, and river…");
   const seed = seedInput.value;
   const biome = biomeInput.value;
   let nextTerrain;
   let nextTrees;
   let nextCover;
+  let nextRiver;
+  let nextRiverGeometry;
   try {
     nextTerrain = createAsset("terrain", seed, {
       width: TERRAIN_WIDTH,
@@ -82,6 +86,29 @@ function growLandscape() {
       terrainSeed: nextTerrain.spec.seed,
       terrainParams: nextTerrain.spec.params,
     });
+    nextRiver = createAsset("water", `${seed}:river`, {
+      shape: "river",
+      width: 8,
+      depth: 44,
+      segmentsX: 16,
+      segmentsZ: 72,
+      palette: "lagoon",
+    });
+    nextRiverGeometry = {
+      vertices: new Float32Array(nextRiver.geometry.vertices),
+      indices: nextRiver.geometry.indices,
+      stride: nextRiver.geometry.stride,
+    };
+    const riverX = 9;
+    for (let i = 0; i < nextRiverGeometry.vertices.length; i += nextRiverGeometry.stride) {
+      nextRiverGeometry.vertices[i] += riverX;
+      nextRiverGeometry.vertices[i + 1] = sampleTerrainHeight(
+        nextTerrain.spec.seed,
+        nextRiverGeometry.vertices[i],
+        nextRiverGeometry.vertices[i + 2],
+        nextTerrain.spec.params,
+      ) + 0.14;
+    }
     const treePositions = nextTrees.spec.children.map((tree) => [
       tree.position[0],
       tree.position[1],
@@ -96,19 +123,23 @@ function growLandscape() {
       terrainSeed: nextTerrain.spec.seed,
       terrainParams: nextTerrain.spec.params,
       treePositions,
+      avoidPaths: [{ points: [[riverX, -23], [riverX, 23]], width: 9.5 }],
     });
 
     const gpuTerrain = uploadMesh(gl, nextTerrain.geometry);
     const gpuTrees = uploadMesh(gl, nextTrees.geometry);
     const gpuCover = uploadMesh(gl, nextCover.geometry);
+    const gpuRiver = uploadMesh(gl, nextRiverGeometry);
     terrainMesh?.dispose();
     treesMesh?.dispose();
     coverMesh?.dispose();
+    riverMesh?.dispose();
     terrainMesh = gpuTerrain;
     treesMesh = gpuTrees;
     coverMesh = gpuCover;
-    syncStats(nextTerrain, nextTrees, nextCover);
-    setStatus(`Grown from ${nextTerrain.spec.seed}. Terrain, trees, and groundcover share one seed.`);
+    riverMesh = gpuRiver;
+    syncStats(nextTerrain, nextTrees, nextCover, nextRiver);
+    setStatus(`Grown from ${nextTerrain.spec.seed}. Terrain, trees, groundcover, and river share one seed.`);
   } catch (error) {
     setStatus(error?.message ?? String(error), true);
   } finally {
@@ -116,19 +147,21 @@ function growLandscape() {
   }
 }
 
-function syncStats(terrain, grove, groundcover) {
+function syncStats(terrain, grove, groundcover, water) {
   const treeVertices = grove.geometry.vertices.length / grove.geometry.stride;
   const coverVertices = groundcover.geometry.vertices.length / groundcover.geometry.stride;
   const terrainVertices = terrain.geometry.vertices.length / terrain.geometry.stride;
-  const vertices = terrainVertices + treeVertices + coverVertices;
-  const triangles = (terrain.geometry.indices.length + grove.geometry.indices.length + groundcover.geometry.indices.length) / 3;
+  const waterVertices = water.geometry.vertices.length / water.geometry.stride;
+  const vertices = terrainVertices + treeVertices + coverVertices + waterVertices;
+  const triangles = (terrain.geometry.indices.length + grove.geometry.indices.length + groundcover.geometry.indices.length + water.geometry.indices.length) / 3;
   const bytes = terrain.geometry.vertices.byteLength + terrain.geometry.indices.byteLength
     + grove.geometry.vertices.byteLength + grove.geometry.indices.byteLength
-    + groundcover.geometry.vertices.byteLength + groundcover.geometry.indices.byteLength;
+    + groundcover.geometry.vertices.byteLength + groundcover.geometry.indices.byteLength
+    + water.geometry.vertices.byteLength + water.geometry.indices.byteLength;
   document.querySelector("#terrain-stat").textContent = `${terrain.spec.params.width} × ${terrain.spec.params.depth} m · ${terrain.spec.measurements.minHeight.toFixed(1)} to ${terrain.spec.measurements.maxHeight.toFixed(1)} m`;
   document.querySelector("#tree-stat").textContent = `${grove.spec.children.length} trees · terrain-following trunks`;
   document.querySelector("#cover-stat").textContent = `${groundcover.spec.measurements.clumps} clumps · ${groundcover.spec.measurements.fernClumps} ferns · ${groundcover.spec.measurements.shrubClumps} shrubs · ${groundcover.spec.measurements.rosetteClumps} rosettes · ${groundcover.spec.measurements.flowers} blooms`;
-  document.querySelector("#gpu-stat").textContent = `${vertices.toLocaleString()} verts · ${triangles.toLocaleString()} tris · ${(bytes / 1024).toFixed(0)} KiB · 3 draws`;
+  document.querySelector("#gpu-stat").textContent = `${vertices.toLocaleString()} verts · ${triangles.toLocaleString()} tris · ${(bytes / 1024).toFixed(0)} KiB · 4 draws`;
 
   const species = new Map();
   for (const tree of grove.spec.children) species.set(tree.params.variant, (species.get(tree.params.variant) ?? 0) + 1);
@@ -182,6 +215,7 @@ function render(now) {
   gl.uniform1f(uniforms.time, reducedMotion ? 0 : now * 0.001);
   gl.uniform2f(uniforms.windDirection, 0.82, 0.57);
   draw(terrainMesh, 0);
+  draw(riverMesh, 0);
   draw(treesMesh, 0.21);
   draw(coverMesh, 0.36);
   gl.bindVertexArray(null);
@@ -239,5 +273,6 @@ window.addEventListener("pagehide", () => {
   terrainMesh?.dispose();
   treesMesh?.dispose();
   coverMesh?.dispose();
+  riverMesh?.dispose();
   if (program && gl) gl.deleteProgram(program);
 }, { once: true });
