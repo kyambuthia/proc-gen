@@ -22,20 +22,42 @@ out vec3 vColor;
 out vec3 vLocal;
 out vec3 vWorld;
 flat out float vSurface;
+flat out vec2 vWaterFlow;
+flat out float vWaterCurrent;
 
 void main() {
   vec3 p = aPosition;
   float phase = uTime * 1.35 + p.y * 1.7 + p.x * 0.41 + p.z * 0.29;
   float sway = sin(phase) * aWind * uWindStrength;
   p.xz += uWindDirection * sway;
+  float surfaceKind = floor(aSurface + 0.0001);
+  float ocean = step(2.5, surfaceKind);
+  float current = step(1.5, surfaceKind) * (1.0 - ocean);
+  vec2 baseFlow = normalize(uWindDirection + vec2(0.0001));
+  float riverAngle = fract(aSurface) * 6.28318530718 - 3.14159265359;
+  vec2 riverFlow = vec2(cos(riverAngle), sin(riverAngle));
+  vec2 flowDirection = mix(baseFlow, riverFlow, current);
+  vec2 crossDirection = vec2(-flowDirection.y, flowDirection.x);
   vec3 localNormal = aNormal;
   if (aSurface > 0.5) {
-    vec2 waterCoord = p.xz - uWindDirection * uTime * (0.2 + uWindStrength * 0.8);
-    float waveA = dot(waterCoord, vec2(0.72, 0.28)) + uTime * 1.4;
-    float waveB = dot(waterCoord, vec2(-0.24, 0.9)) * 1.35 - uTime * 0.8;
-    p.y += 0.035 * sin(waveA) + 0.018 * sin(waveB);
-    float slopeX = 0.035 * cos(waveA) * 0.72 + 0.018 * cos(waveB) * -0.324;
-    float slopeZ = 0.035 * cos(waveA) * 0.28 + 0.018 * cos(waveB) * 1.215;
+    float advection = mix(0.18 + uWindStrength * 0.5, 0.82, current);
+    advection = mix(advection, 0.42, ocean);
+    vec2 waterCoord = p.xz - flowDirection * uTime * advection;
+    vec2 waveDirectionA = flowDirection * 0.72 + crossDirection * 0.28;
+    vec2 waveDirectionB = (-flowDirection * 0.24 + crossDirection * 0.9) * 1.35;
+    float speedA = mix(1.4, 2.2, current);
+    float speedB = mix(0.8, 1.25, current);
+    speedA = mix(speedA, 1.25, ocean);
+    speedB = mix(speedB, 0.68, ocean);
+    float waveA = dot(waterCoord, waveDirectionA) + uTime * speedA;
+    float waveB = dot(waterCoord, waveDirectionB) - uTime * speedB;
+    float amplitudeA = mix(0.055, 0.016, current);
+    float amplitudeB = mix(0.026, 0.008, current);
+    amplitudeA = mix(amplitudeA, 0.12, ocean);
+    amplitudeB = mix(amplitudeB, 0.055, ocean);
+    p.y += amplitudeA * sin(waveA) + amplitudeB * sin(waveB);
+    float slopeX = amplitudeA * cos(waveA) * waveDirectionA.x + amplitudeB * cos(waveB) * waveDirectionB.x;
+    float slopeZ = amplitudeA * cos(waveA) * waveDirectionA.y + amplitudeB * cos(waveB) * waveDirectionB.y;
     localNormal = normalize(vec3(-slopeX, 1.0, -slopeZ));
   }
   mat4 model = mat4(iModel0, iModel1, iModel2, iModel3);
@@ -46,6 +68,8 @@ void main() {
   vLocal = aPosition;
   vWorld = world.xyz;
   vSurface = aSurface;
+  vWaterFlow = normalize((mat3(model) * vec3(flowDirection.x, 0.0, flowDirection.y)).xz);
+  vWaterCurrent = current;
   gl_Position = uViewProjection * world;
 }
 `;
@@ -57,9 +81,10 @@ in vec3 vColor;
 in vec3 vLocal;
 in vec3 vWorld;
 flat in float vSurface;
+flat in vec2 vWaterFlow;
+flat in float vWaterCurrent;
 uniform vec3 uViewPosition;
 uniform highp float uTime;
-uniform highp vec2 uWindDirection;
 out vec4 outColor;
 
 float hashCell(vec3 p) {
@@ -81,19 +106,34 @@ void main() {
   vec3 viewDir = normalize(uViewPosition - vWorld);
   vec3 painted;
   if (vSurface > 0.5) {
-    vec2 waterCoord = vWorld.xz - uWindDirection * uTime * 0.16;
-    float ribbons = sin(waterCoord.x * 1.35 - waterCoord.y * 0.52 + uTime * 1.05);
-    float crossRipples = sin(waterCoord.y * 2.8 + waterCoord.x * 0.6 - uTime * 0.72);
-    float paletteShift = 0.5 + 0.5 * sin(waterCoord.x * 0.19 + waterCoord.y * 0.13 + ribbons * 0.7);
-    vec3 deepBlue = vec3(0.025, 0.2, 0.43);
-    vec3 brightTeal = vec3(0.08, 0.57, 0.63);
+    float surfaceKind = floor(vSurface + 0.0001);
+    float ocean = step(2.5, surfaceKind);
+    vec2 flow = normalize(vWaterFlow + vec2(0.0001));
+    vec2 across = vec2(-flow.y, flow.x);
+    float advection = mix(0.16, 0.82, vWaterCurrent);
+    advection = mix(advection, 0.42, ocean);
+    vec2 waterCoord = vWorld.xz - flow * uTime * advection;
+    float alongPosition = dot(waterCoord, flow);
+    float acrossPosition = dot(waterCoord, across);
+    float ribbonFrequency = mix(1.35, 1.8, vWaterCurrent);
+    ribbonFrequency = mix(ribbonFrequency, 0.58, ocean);
+    float crossFrequency = mix(2.8, 1.5, ocean);
+    float ribbons = sin(alongPosition * ribbonFrequency - acrossPosition * 0.52 + uTime * 1.05);
+    float crossRipples = sin(acrossPosition * crossFrequency + alongPosition * 0.6 - uTime * 0.72);
+    float paletteShift = 0.5 + 0.5 * sin(alongPosition * 0.19 + acrossPosition * 0.13 + ribbons * 0.7);
+    vec3 deepBlue = mix(vec3(0.025, 0.2, 0.43), vec3(0.025, 0.27, 0.48), vWaterCurrent);
+    vec3 brightTeal = mix(vec3(0.08, 0.57, 0.63), vec3(0.11, 0.64, 0.68), vWaterCurrent);
+    deepBlue = mix(deepBlue, vec3(0.012, 0.14, 0.38), ocean);
+    brightTeal = mix(brightTeal, vec3(0.035, 0.47, 0.68), ocean);
     vec3 waterColor = mix(deepBlue, brightTeal, clamp(paletteShift * 0.64 + vColor.g * 0.35, 0.0, 1.0));
     waterColor = mix(waterColor, vColor, 0.32);
     float brush = smoothstep(0.1, 0.94, ribbons * 0.42 + crossRipples * 0.34 + diffuse * 0.42);
+    float foamStroke = smoothstep(0.88, 0.99, abs(crossRipples + ribbons * 0.32)) * max(vWaterCurrent, ocean * 0.24);
     float glint = pow(max(dot(reflect(-normalize(vec3(-0.42, 0.82, 0.38)), n), viewDir), 0.0), 18.0);
     float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 2.0);
     painted = waterColor * (0.78 + bands * 0.28) * (1.0 + cellPigment * 0.08);
     painted += vec3(0.19, 0.68, 0.72) * brush * 0.17;
+    painted += vec3(0.68, 0.91, 0.84) * foamStroke * 0.2;
     painted += vec3(0.76, 0.92, 0.8) * (glint * 0.44 + fresnel * 0.1);
   } else {
     float pigment = 1.0 + cellPigment * 0.15 + stroke * 0.035;

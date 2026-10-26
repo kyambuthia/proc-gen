@@ -1,5 +1,18 @@
 export const SURFACE_DEFAULT = 0;
 export const SURFACE_WATER = 1;
+export const SURFACE_RIVER = 2;
+export const SURFACE_OCEAN = 3;
+
+// A flowing surface keeps its kind in the integer part and its downstream angle
+// in the fractional part, leaving the geometric normal available to exporters.
+export function encodeRiverSurface(directionX, directionZ) {
+  if (!Number.isFinite(directionX) || !Number.isFinite(directionZ) || Math.hypot(directionX, directionZ) < 1e-6) {
+    throw new TypeError("River flow direction must be a finite non-zero x/z vector");
+  }
+  const angle = Math.atan2(directionZ, directionX);
+  const encodedAngle = Math.min((angle + Math.PI) / (Math.PI * 2), 1 - 1e-6);
+  return SURFACE_RIVER + encodedAngle;
+}
 
 const STRIDE = 11; // position 3, normal 3, linear color 3, wind weight 1, surface id 1
 

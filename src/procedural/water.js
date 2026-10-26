@@ -1,6 +1,6 @@
 import { registerAssetGenerator } from "./asset-registry.js";
 import { createRng, hashSeed } from "./seed.js";
-import { MeshBuilder, SURFACE_WATER } from "./mesh-builder.js";
+import { encodeRiverSurface, MeshBuilder, SURFACE_OCEAN, SURFACE_WATER } from "./mesh-builder.js";
 
 const PALETTES = {
   lagoon: [[0.06, 0.34, 0.56], [0.08, 0.47, 0.66], [0.12, 0.58, 0.68], [0.27, 0.72, 0.69]],
@@ -58,7 +58,7 @@ export function createWater(seed, {
         color,
         [0, 1, 0],
         0,
-        SURFACE_WATER,
+        shape === "river" ? encodeRiverSurface(0, 1) : shape === "ocean" ? SURFACE_OCEAN : SURFACE_WATER,
       );
     }
   }
@@ -71,7 +71,13 @@ export function createWater(seed, {
       seed: seedValue,
       params: { shape, width, depth, segmentsX, segmentsZ, palette },
       measurements: { width, depth, tiles: geometry.indices.length / 6 },
-      motion: { kind: "shader-wave", amplitude: 0.055, speed: 1, windResponsive: true },
+      motion: {
+        kind: "shader-wave",
+        amplitude: shape === "river" ? 0.024 : shape === "ocean" ? 0.175 : 0.081,
+        speed: shape === "river" ? 2.2 : shape === "ocean" ? 1.25 : 1,
+        windResponsive: shape !== "river",
+        ...(shape === "river" ? { flowDirection: [0, 0, 1] } : {}),
+      },
       collider: { kind: "none" },
     },
     bounds: { min: [-width * 0.5, -0.055, -depth * 0.5], max: [width * 0.5, 0.055, depth * 0.5] },

@@ -1,4 +1,4 @@
-import { MeshBuilder, SURFACE_DEFAULT, SURFACE_WATER } from "../procedural/mesh-builder.js";
+import { encodeRiverSurface, MeshBuilder, SURFACE_DEFAULT, SURFACE_WATER } from "../procedural/mesh-builder.js";
 import { createRng, hashSeed } from "../procedural/seed.js";
 import { createAsset } from "../procedural/assets.js";
 import { TREE_VARIANTS } from "../procedural/tree.js";
@@ -441,10 +441,13 @@ function drawLineMesh(mesh, feature) {
       const p1 = [b[0] + sx, y, b[1] + sz];
       const p2 = [b[0] - sx, y, b[1] - sz];
       const p3 = [a[0] - sx, y, a[1] - sz];
+      if (feature.kind === "waterway") {
+        mesh.addQuad([p0, p1, p2, p3], color, [0, 1, 0], 0, encodeRiverSurface(dx, dz));
+        continue;
+      }
       const up = [0, -1, 0];
-      const surface = feature.kind === "waterway" ? SURFACE_WATER : SURFACE_DEFAULT;
-      mesh.addFlatTriangle([p0, p1, p2], color, up, 0, surface);
-      mesh.addFlatTriangle([p0, p2, p3], color, up, 0, surface);
+      mesh.addFlatTriangle([p0, p1, p2], color, up, 0, SURFACE_DEFAULT);
+      mesh.addFlatTriangle([p0, p2, p3], color, up, 0, SURFACE_DEFAULT);
     }
   }
 }

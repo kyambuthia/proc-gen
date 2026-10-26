@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createNav } from "../src/nav.js";
-import { SURFACE_WATER } from "../src/procedural/mesh-builder.js";
+import { SURFACE_RIVER, SURFACE_WATER } from "../src/procedural/mesh-builder.js";
 import { sampleTerrainHeight } from "../src/procedural/terrain.js";
 import {
   createOsmScene,
@@ -90,9 +90,15 @@ test("OSM ways become seeded, bounded meshes with portable attribution", () => {
   assert.ok(scene.meshes.trees.length > 0, "mapped park receives seeded procedural trees");
   assert.ok(scene.meshes.groundcover.length > 0, "mapped park receives bounded seeded grass and flowers");
   assert.ok(scene.meshes.rats.length > 0, "mapped park receives a seeded procedural rat population");
-  for (const mesh of [...scene.meshes.water, ...scene.meshes.waterways]) {
+  for (const mesh of scene.meshes.water) {
     for (let i = 0; i < mesh.vertices.length; i += mesh.stride) {
-      assert.equal(mesh.vertices[i + 10], SURFACE_WATER, "mapped water must use the animated water shader path");
+      assert.equal(mesh.vertices[i + 10], SURFACE_WATER, "mapped lakes must use the animated water shader path");
+    }
+  }
+  for (const mesh of scene.meshes.waterways) {
+    for (let i = 0; i < mesh.vertices.length; i += mesh.stride) {
+      assert.equal(Math.floor(mesh.vertices[i + 10] + 0.0001), SURFACE_RIVER, "mapped waterways must use the flowing water shader path");
+      assert.deepEqual(Array.from(mesh.vertices.slice(i + 3, i + 6)), [0, 1, 0], "river vertices preserve their geometric surface normal");
     }
   }
   const terrainMesh = scene.meshes.terrain[0];

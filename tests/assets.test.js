@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { HUMANOID_FOOT_LIFT, HUMANOID_JOINTS, HUMANOID_PARTS } from "../src/procedural/humanoid-rig.js";
+import { encodeRiverSurface, SURFACE_OCEAN, SURFACE_RIVER, SURFACE_WATER } from "../src/procedural/mesh-builder.js";
 import {
   createAsset,
   deserializeAsset,
@@ -98,13 +99,25 @@ test("tree species have distinct portable silhouettes and a naturally spaced gro
 });
 
 test("water assets carry a shader surface id and a portable wave recipe", () => {
+  assert.equal(encodeRiverSurface(1, 0), SURFACE_RIVER + 0.5);
+  assert.equal(encodeRiverSurface(0, 1), SURFACE_RIVER + 0.75);
   const water = createAsset("water", "painted-river", { shape: "river", width: 4, depth: 18 });
   assert.equal(water.spec.motion.kind, "shader-wave");
   assert.equal(water.spec.collider.kind, "none");
+  assert.equal(water.spec.motion.amplitude, 0.024);
+  assert.equal(water.spec.motion.speed, 2.2);
   assert.ok(water.spec.measurements.tiles > 0);
+  assert.deepEqual(water.spec.motion.flowDirection, [0, 0, 1]);
   for (let i = 0; i < water.geometry.vertices.length; i += water.geometry.stride) {
-    assert.equal(water.geometry.vertices[i + 10], 1, "water vertices must select the animated water shader path");
+    assert.equal(water.geometry.vertices[i + 10], encodeRiverSurface(0, 1), "river vertices store their downstream heading in the shader channel");
+    assert.deepEqual(Array.from(water.geometry.vertices.slice(i + 3, i + 6)), [0, 1, 0], "river geometry retains upward normals for generic glTF viewers");
   }
+  const pond = createAsset("water", "still-pond", { shape: "pond" });
+  const ocean = createAsset("water", "wide-ocean", { shape: "ocean" });
+  assert.equal(pond.geometry.vertices[10], SURFACE_WATER);
+  assert.equal(ocean.geometry.vertices[10], SURFACE_OCEAN);
+  assert.equal(ocean.spec.motion.amplitude, 0.175);
+  assert.equal(ocean.spec.motion.speed, 1.25);
   assert.throws(() => createAsset("water", 1, { shape: "lake" }), /Unknown water shape/);
 });
 

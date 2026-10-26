@@ -18,7 +18,7 @@ Generators use stable seed derivation rather than global `Math.random()`. Repeat
 
 ## Shader contract
 
-The baseline material uses vertex colors, faceted normals, quantized diffuse bands, and a small object-space pigment variation. Wind is a bounded vertex displacement weighted per vertex. The baseline has no texture reads, dynamic loops, floating-point render targets, or required post-processing. Additional style layers must have a documented low-end fallback.
+The baseline material uses vertex colors, faceted normals, quantized diffuse bands, and a small object-space pigment variation. Wind is a bounded vertex displacement weighted per vertex. Rivers carry their flow heading in the fractional part of the custom surface channel; the shader uses that heading for current and narrow foam strokes while preserving geometric normals for generic GLB viewers. Ponds and oceans use separate low-cost wave amplitudes. The baseline has no texture reads, dynamic loops, floating-point render targets, or required post-processing. Additional style layers must have a documented low-end fallback.
 
 ## Simulation contract
 
