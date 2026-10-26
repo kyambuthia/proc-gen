@@ -390,7 +390,7 @@ export async function createWorld() {
 
   // ---------------------------------------------------------------- characters and ray casts
 
-  const world = { characters: [], ball, ctx: { Jolt, bodies, physics } };
+  const world = { characters: [], ball, obstacles: OBSTACLES, ctx: { Jolt, bodies, physics } };
 
   // A tiny event bus: gunshots and hits are announced here so NPCs can hear and react to them.
   const listeners = new Set();

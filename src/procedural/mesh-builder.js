@@ -104,8 +104,54 @@ export class MeshBuilder {
       for (let x = 0; x < segments; x++) {
         const a = first + y * (segments + 1) + x;
         const b = a + segments + 1;
-        this.triangle(a, a + 1, b);
-        this.triangle(a + 1, b + 1, b);
+        this.triangle(a, a + 1, b + 1);
+        this.triangle(a, b + 1, b);
+      }
+    }
+  }
+
+  addCapsule(halfHeight, radius, color, segments = 10, hemisphereRings = 4, wind = 0) {
+    const rings = [{ y: -halfHeight - radius, radial: 0, normalY: -1, normalRadial: 0 }];
+    for (let i = 1; i <= hemisphereRings; i++) {
+      const angle = -Math.PI / 2 + (i / hemisphereRings) * (Math.PI / 2);
+      rings.push({
+        y: -halfHeight + Math.sin(angle) * radius,
+        radial: Math.cos(angle) * radius,
+        normalY: Math.sin(angle),
+        normalRadial: Math.cos(angle),
+      });
+    }
+    rings.push({ y: halfHeight, radial: radius, normalY: 0, normalRadial: 1 });
+    for (let i = 1; i <= hemisphereRings; i++) {
+      const angle = (i / hemisphereRings) * (Math.PI / 2);
+      rings.push({
+        y: halfHeight + Math.sin(angle) * radius,
+        radial: Math.cos(angle) * radius,
+        normalY: Math.sin(angle),
+        normalRadial: Math.cos(angle),
+      });
+    }
+
+    const first = this.vertices.length / STRIDE;
+    for (const ring of rings) {
+      for (let i = 0; i <= segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        this.vertex(
+          [ring.radial * c, ring.y, ring.radial * s],
+          [ring.normalRadial * c, ring.normalY, ring.normalRadial * s],
+          color,
+          wind,
+        );
+      }
+    }
+    for (let y = 0; y < rings.length - 1; y++) {
+      for (let x = 0; x < segments; x++) {
+        const a = first + y * (segments + 1) + x;
+        const b = a + segments + 1;
+        this.triangle(a, b, b + 1);
+        this.triangle(a, b + 1, a + 1);
       }
     }
   }

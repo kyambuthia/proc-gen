@@ -5,6 +5,11 @@ layout(location=0) in vec3 aPosition;
 layout(location=1) in vec3 aNormal;
 layout(location=2) in vec3 aColor;
 layout(location=3) in float aWind;
+layout(location=4) in vec4 iModel0;
+layout(location=5) in vec4 iModel1;
+layout(location=6) in vec4 iModel2;
+layout(location=7) in vec4 iModel3;
+layout(location=8) in vec3 iTint;
 
 uniform mat4 uViewProjection;
 uniform float uTime;
@@ -21,11 +26,14 @@ void main() {
   float phase = uTime * 1.35 + p.y * 1.7 + p.x * 0.41 + p.z * 0.29;
   float sway = sin(phase) * aWind * uWindStrength;
   p.xz += uWindDirection * sway;
-  vNormal = normalize(aNormal);
-  vColor = aColor;
+  mat4 model = mat4(iModel0, iModel1, iModel2, iModel3);
+  vec3 scale = max(vec3(length(model[0].xyz), length(model[1].xyz), length(model[2].xyz)), vec3(0.0001));
+  vec4 world = model * vec4(p, 1.0);
+  vNormal = normalize(mat3(model) * (aNormal / scale));
+  vColor = aColor * iTint;
   vLocal = aPosition;
-  vWorld = p;
-  gl_Position = uViewProjection * vec4(p, 1.0);
+  vWorld = world.xyz;
+  gl_Position = uViewProjection * world;
 }
 `;
 

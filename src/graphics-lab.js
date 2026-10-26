@@ -90,7 +90,7 @@ if (!gl) {
     gl.uniform2f(uniforms.windDirection, 0.82, 0.57);
     gl.uniform1f(uniforms.windStrength, reducedMotion ? 0 : 0.22);
     gl.bindVertexArray(sceneMesh.vao);
-    gl.drawElements(gl.TRIANGLES, sceneMesh.indexCount, gl.UNSIGNED_SHORT, 0);
+    gl.drawElementsInstanced(gl.TRIANGLES, sceneMesh.indexCount, gl.UNSIGNED_SHORT, 0, sceneMesh.instanceCount);
     gl.bindVertexArray(null);
     frameId = requestAnimationFrame(render);
   }
