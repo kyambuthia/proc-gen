@@ -60,6 +60,20 @@ function drawMinimap(canvas, world, game) {
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+  if (game.vehicle) {
+    const car = game.vehicle.read();
+    const x = px(car.x);
+    const z = pz(car.z);
+    ctx.save();
+    ctx.translate(x, z);
+    ctx.rotate(-car.yaw);
+    ctx.fillStyle = game.drivingVehicle ? "#5ce5e5" : "#61b8bd";
+    ctx.strokeStyle = "#eaffff";
+    ctx.lineWidth = 1.25;
+    ctx.fillRect(-3.5, -6.5, 7, 13);
+    ctx.strokeRect(-3.5, -6.5, 7, 13);
+    ctx.restore();
+  }
   if (game.hero) {
     const x = px(game.hero.state.pos[0]);
     const z = pz(game.hero.state.pos[2]);
@@ -118,6 +132,10 @@ export async function startGame() {
   const touchMove = { x: 0, z: 0 };
   const game = {
     hero: null,
+    player: null,
+    vehicle: null,
+    drivingVehicle: null,
+    vehicleCameraOffset: 0,
     npcs: [],
     keys,
     yaw: 0,
@@ -144,6 +162,26 @@ export async function startGame() {
     character.appearance = { spec: human.spec };
     return character;
   };
+  function findVehicleSpawn(origin) {
+    const offsets = [
+      [0, 0], [3.5, 0], [-3.5, 0], [0, 4.5], [0, -4.5],
+      [4, 4], [-4, 4], [4, -4], [-4, -4], [7, 0], [-7, 0], [0, 8], [0, -8],
+    ];
+    const limit = world.terrain ? Math.min(world.terrain.params.width, world.terrain.params.depth) * 0.5 - 2.8 : 44;
+    for (const [dx, dz] of offsets) {
+      const x = origin[0] + dx;
+      const z = origin[1] + dz;
+      if (Math.abs(x) > limit || Math.abs(z) > limit || !nav.walkable(x, z)) continue;
+      const hitsObstacle = world.obstacles.some((obstacle) =>
+        Math.abs(x - obstacle.pos[0]) < 1.25 + obstacle.half[0] + 0.35 &&
+        Math.abs(z - obstacle.pos[2]) < 2.35 + obstacle.half[2] + 0.35,
+      );
+      if (hitsObstacle) continue;
+      if ([-1, 1].some((side) => !nav.walkable(x + side * 1.1, z) || !nav.walkable(x, z + side * 2))) continue;
+      return [x, z];
+    }
+    return null;
+  }
   const spawnNpc = (role, [x, z], yaw = Math.random() * Math.PI * 2) => {
     const character = spawn([x, world.terrainHeightAt(x, z) + RAGDOLL_FOOT_OFFSET + 0.02, z], {
       kind: "npc",
@@ -156,6 +194,10 @@ export async function startGame() {
     return character;
   };
   game.hero = spawn([0, world.terrainHeightAt(0, 4) + RAGDOLL_FOOT_OFFSET + 0.02, 4], { kind: "player", yaw: Math.PI });
+  const carAsset = createAsset("car", `${seed ?? "classic"}:driveable-car`, { paint: "lagoon" });
+  const carSpawn = findVehicleSpawn([3.5, 5.5]) ?? [3.5, 5.5];
+  game.vehicle = world.createVehicle(carAsset, [carSpawn[0], world.terrainHeightAt(...carSpawn) + 0.55, carSpawn[1]], { yaw: 0 });
+  game.event = "Press C near the car to drive";
   game.npcs = NPC_SPAWNS.map(({ at, role }) => spawnNpc(role, at));
   game.waves = createWaveDirector({
     world,
@@ -208,6 +250,12 @@ export async function startGame() {
       rebuildNav(obstacles, world.terrainHeightAt);
       spawns = findMapSpawns();
       renderer.setOsmScene(scene);
+      const carSpawnOnMap = findVehicleSpawn([spawns[0][0] + 4, spawns[0][1]]);
+      if (carSpawnOnMap) game.vehicle.teleport([
+        carSpawnOnMap[0],
+        world.terrainHeightAt(...carSpawnOnMap) + 0.55,
+        carSpawnOnMap[1],
+      ], 0);
     } catch (error) {
       world.setTerrain(previousTerrain);
       world.setObstacles(previousObstacles);
@@ -216,9 +264,20 @@ export async function startGame() {
     }
 
     game.waves.stop();
+    if (game.drivingVehicle) {
+      game.drivingVehicle.setInput({});
+      game.drivingVehicle = null;
+      game.player = null;
+      game.vehicleCameraOffset = 0;
+      keys.clear();
+      setTouchVehicleMode(false);
+    }
     for (const character of [...world.characters]) world.removeCharacter(character);
     game.npcs.length = 0;
     game.hero = spawn([spawns[0][0], world.terrainHeightAt(spawns[0][0], spawns[0][1]) + RAGDOLL_FOOT_OFFSET + 0.02, spawns[0][1]], { kind: "player", yaw: Math.PI });
+    game.yaw = Math.PI;
+    game.pitch = 0.3;
+    game.dist = 6;
     game.npcs = NPC_SPAWNS.map(({ role }, index) => spawnNpc(role, spawns[index + 1]));
     const ballX = spawns[0][0] + 1.4;
     const ballZ = spawns[0][1] + 1.4;
@@ -232,9 +291,14 @@ export async function startGame() {
     element("#osm-message").textContent = `Loaded ${scene.spec.features.length} features. ${obstacles.length} buildings block movement; NPCs use the updated navigation grid.`;
   }
 
-  const baseForPlayer = () => game.hero
-    ? game.hero.state
-    : { pos: [0, 0, 4], heading: game.heading };
+  const baseForPlayer = () => {
+    if (game.hero) return game.hero.state;
+    if (game.player) {
+      const state = game.player.read();
+      return { pos: [state.x, state.y, state.z], heading: state.yaw };
+    }
+    return { pos: [0, 0, 4], heading: game.heading };
+  };
 
   function readInput() {
     const has = (code) => keys.has(code);
@@ -255,6 +319,113 @@ export async function startGame() {
       run: has("ShiftLeft") || has("ShiftRight"),
       jump: has("Space") || has("TouchJump"),
     };
+  }
+
+  function readVehicleInput() {
+    const has = (code) => keys.has(code);
+    let forward = clamp(
+      (has("KeyW") || has("ArrowUp") ? 1 : 0) - (has("KeyS") || has("ArrowDown") ? 1 : 0) + touchMove.z,
+      -1,
+      1,
+    );
+    let right = clamp(
+      (has("KeyD") || has("ArrowRight") ? 1 : 0) - (has("KeyA") || has("ArrowLeft") ? 1 : 0) + touchMove.x,
+      -1,
+      1,
+    );
+    const length = Math.hypot(forward, right);
+    if (length > 1) {
+      forward /= length;
+      right /= length;
+    }
+    const brake = has("Space") ? 1 : 0;
+    const handBrake = has("ShiftLeft") || has("ShiftRight") ? 1 : 0;
+    if (brake > 0 || handBrake > 0) forward = 0;
+    return {
+      forward,
+      right,
+      brake,
+      handBrake,
+    };
+  }
+
+  function setTouchVehicleMode(driving) {
+    const brake = element("#touch-jump");
+    brake.textContent = driving ? "BRAKE" : "JUMP";
+    brake.setAttribute("aria-label", driving ? "Brake vehicle" : "Jump");
+  }
+
+  function findVehicleExit(state) {
+    const candidates = [[1.75, 0], [-1.75, 0], [1.75, -1.4], [-1.75, -1.4], [1.75, 1.4], [-1.75, 1.4]];
+    const c = Math.cos(state.yaw);
+    const s = Math.sin(state.yaw);
+    for (const [right, forward] of candidates) {
+      const x = state.x + c * right + s * forward;
+      const z = state.z - s * right + c * forward;
+      if (nav.walkable(x, z)) return [x, z];
+    }
+    return null;
+  }
+
+  function exitVehicle() {
+    const vehicle = game.drivingVehicle;
+    if (!vehicle) return false;
+    const state = vehicle.read();
+    if (state.speed > 2.2) {
+      game.event = "Brake to a stop before getting out";
+      return false;
+    }
+    const at = findVehicleExit(state);
+    if (!at) {
+      game.event = "There is no clear ground to get out here";
+      return false;
+    }
+    vehicle.setInput({});
+    game.hero = spawn([at[0], world.terrainHeightAt(...at) + RAGDOLL_FOOT_OFFSET + 0.02, at[1]], {
+      kind: "player",
+      yaw: state.yaw,
+    });
+    game.player = null;
+    game.drivingVehicle = null;
+    game.vehicleCameraOffset = 0;
+    game.heading = state.yaw;
+    game.yaw = state.yaw + Math.PI;
+    game.dist = 6;
+    keys.clear();
+    touchMove.x = 0;
+    touchMove.z = 0;
+    setTouchVehicleMode(false);
+    game.event = "Back on foot";
+    return true;
+  }
+
+  function toggleVehicle() {
+    if (game.drivingVehicle) {
+      exitVehicle();
+      return;
+    }
+    if (!game.hero || game.waves.active || game.hero.state.mode !== "active") return;
+    const state = game.vehicle.read();
+    const distance = Math.hypot(game.hero.state.pos[0] - state.x, game.hero.state.pos[2] - state.z);
+    if (distance > 5.2) {
+      game.event = "Walk closer to the car to drive";
+      return;
+    }
+    if (game.hero.state.holding) game.hero.drop();
+    world.removeCharacter(game.hero);
+    game.hero = null;
+    game.player = game.vehicle;
+    game.drivingVehicle = game.vehicle;
+    game.vehicleCameraOffset = 0;
+    game.heading = state.yaw;
+    game.yaw = state.yaw + Math.PI;
+    game.pitch = 0.34;
+    game.dist = 8.5;
+    keys.clear();
+    touchMove.x = 0;
+    touchMove.z = 0;
+    setTouchVehicleMode(true);
+    game.event = "Driving · WASD or stick · Space to brake";
   }
 
   function cameraAim() {
@@ -332,9 +503,12 @@ export async function startGame() {
       for (const { at, role } of NPC_SPAWNS) game.npcs.push(spawnNpc(role, at));
       game.event = "Wave mode off";
     } else {
+      if (!game.hero) {
+        game.event = "Get out of the car before starting waves";
+        return;
+      }
       for (const character of [...game.npcs]) world.removeCharacter(character);
       game.npcs.length = 0;
-      if (!game.hero) return;
       game.hero.state.hp = game.hero.state.hpMax;
       game.waves.start();
       game.event = "Wave mode started";
@@ -429,6 +603,7 @@ export async function startGame() {
     if (event.code === "KeyH") game.hostile = !game.hostile;
     if (event.code === "KeyN") newArena();
     if (event.code === "KeyV") toggleWaves();
+    if (event.code === "KeyC") toggleVehicle();
     if (event.code === "KeyP") game.paused = !game.paused;
     if (event.code === "KeyF") punch();
     if (event.code === "KeyK") kick();
@@ -481,7 +656,8 @@ export async function startGame() {
     if (event.pointerId !== dragPointerId || !drag) return;
     const dx = event.clientX - drag[0];
     const dy = event.clientY - drag[1];
-    game.yaw -= dx * 0.005;
+    if (game.drivingVehicle) game.vehicleCameraOffset -= dx * 0.005;
+    else game.yaw -= dx * 0.005;
     game.pitch = clamp(game.pitch + dy * 0.005, 0.02, 1.35);
     drag = [event.clientX, event.clientY];
   }
@@ -537,6 +713,7 @@ export async function startGame() {
     knob.style.transform = "translate(0, 0)";
   }
   function activateTouchAction(button) {
+    if (button.dataset.action === "drive") toggleVehicle();
     if (button.dataset.action === "shoot") shoot();
     if (button.dataset.action === "punch") punch();
     if (button.dataset.action === "kick") kick();
@@ -593,13 +770,14 @@ export async function startGame() {
     game.hudTimer = 0;
     const alive = game.npcs.filter((n) => n.state.mode !== "dead").length;
     const hero = game.hero;
-    const mode = hero ? `Active ragdoll · ${hero.state.mode}` : "No player";
+    const vehicle = game.drivingVehicle?.read();
+    const mode = vehicle ? `Driving · ${vehicle.speed.toFixed(1)} m/s` : hero ? `Active ragdoll · ${hero.state.mode}` : "No player";
     const hp = hero ? ` · ${Math.max(0, Math.round(hero.state.hp))} hp` : "";
     const wave = game.waves.active ? ` · Wave ${game.waves.wave || "ready"} · ${game.waves.enemiesLeft()} left · ${game.waves.score} score` : "";
     const worldName = game.osmScene ? "OpenStreetMap patch" : `Arena ${seed ?? "classic"}`;
     status.textContent = `${worldName} · ${mode}${hp} · NPCs ${alive}/${game.npcs.length} · Hostile ${game.hostile || game.waves.active ? "on" : "off"}${wave}${game.event ? ` · ${game.event}` : ""}`;
     const ball = world.ball.position();
-    debug.textContent = `RAW WEBGL 2 · ${game.fps.toFixed(0)} fps · ${game.steps} physics steps · ${world.characters.length * 10 + 1} bodies\nBall ${Math.hypot(...world.ball.velocity()).toFixed(1)} m/s at y=${ball[1].toFixed(2)} · ${renderer.gl.getParameter(renderer.gl.MAX_VERTEX_ATTRIBS)} vertex attributes`;
+    debug.textContent = `RAW WEBGL 2 · ${game.fps.toFixed(0)} fps · ${game.steps} physics steps · ${world.characters.length * 10 + world.vehicles.length + 1} bodies\nBall ${Math.hypot(...world.ball.velocity()).toFixed(1)} m/s at y=${ball[1].toFixed(2)} · ${renderer.gl.getParameter(renderer.gl.MAX_VERTEX_ATTRIBS)} vertex attributes`;
     banner.textContent = game.paused ? "Paused · press P to resume" : game.waves.banner?.text ?? "";
     banner.hidden = !banner.textContent;
     drawMinimap(minimap, world, game);
@@ -615,6 +793,7 @@ export async function startGame() {
     while (game.accumulator >= STEP) {
       game.steps++;
       if (game.hero) game.hero.update(STEP, game.hero.state.mode === "active" ? readInput() : IDLE);
+      if (game.drivingVehicle) game.drivingVehicle.setInput(readVehicleInput());
       const hostile = game.hostile || game.waves.active;
       for (const npc of game.npcs) npc.update(STEP, npc.brain(STEP, hostile));
       world.step(STEP);
@@ -633,6 +812,11 @@ export async function startGame() {
           for (const { at, role } of NPC_SPAWNS) game.npcs.push(spawnNpc(role, at));
         }
       }
+    }
+    if (game.drivingVehicle) {
+      const state = game.drivingVehicle.read();
+      game.heading = state.yaw;
+      game.yaw = state.yaw + Math.PI + game.vehicleCameraOffset;
     }
     updateHud(delta);
     renderer.render(world, game, now * 0.001);
@@ -666,6 +850,7 @@ export async function startGame() {
     element("#osm-form").removeEventListener("submit", onFetchOsm);
     element("#osm-file").removeEventListener("change", onOsmFile);
     element("#export-osm").removeEventListener("click", exportOsmScene);
+    game.vehicle?.dispose();
     renderer.dispose();
   };
 }

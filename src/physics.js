@@ -1,7 +1,7 @@
 import initJolt from "jolt-physics";
 import { createCharacter } from "./character.js";
 import { OBSTACLES, setObstacles as replaceObstacles } from "./scenery.js";
-import { qRot, rayVsBox, rayVsCapsule, rayVsSphere } from "./math.js";
+import { qConj, qMul, qRot, rayVsBox, rayVsCapsule, rayVsSphere } from "./math.js";
 import { HUMANOID_FOOT_LIFT, HUMANOID_JOINTS as JOINTS, HUMANOID_PARTS as PARTS, SIDE, UP } from "./procedural/humanoid-rig.js";
 import { sampleTerrainHeight } from "./procedural/terrain.js";
 
@@ -9,7 +9,8 @@ const LAYER_STATIC = 0;
 const LAYER_RAGDOLL = 1;
 const LAYER_BALL = 2;
 const LAYER_HELD = 3; // the ball while someone carries it: collides with nothing
-const NUM_LAYERS = 4;
+const LAYER_VEHICLE = 4;
+const NUM_LAYERS = 5;
 const NUM_BROAD_PHASE_LAYERS = 2;
 
 export { OBSTACLES };
@@ -56,12 +57,17 @@ export async function createWorld() {
   // The ball is hit by scenery and by every ragdoll part, but not by other balls.
   objectFilter.EnableCollision(LAYER_BALL, LAYER_STATIC);
   objectFilter.EnableCollision(LAYER_BALL, LAYER_RAGDOLL);
+  objectFilter.EnableCollision(LAYER_BALL, LAYER_VEHICLE);
+  objectFilter.EnableCollision(LAYER_STATIC, LAYER_VEHICLE);
+  objectFilter.EnableCollision(LAYER_RAGDOLL, LAYER_VEHICLE);
+  objectFilter.EnableCollision(LAYER_VEHICLE, LAYER_VEHICLE);
 
   const broadPhase = new Jolt.BroadPhaseLayerInterfaceTable(NUM_LAYERS, NUM_BROAD_PHASE_LAYERS);
   broadPhase.MapObjectToBroadPhaseLayer(LAYER_STATIC, new Jolt.BroadPhaseLayer(0));
   broadPhase.MapObjectToBroadPhaseLayer(LAYER_RAGDOLL, new Jolt.BroadPhaseLayer(1));
   broadPhase.MapObjectToBroadPhaseLayer(LAYER_BALL, new Jolt.BroadPhaseLayer(1));
   broadPhase.MapObjectToBroadPhaseLayer(LAYER_HELD, new Jolt.BroadPhaseLayer(1));
+  broadPhase.MapObjectToBroadPhaseLayer(LAYER_VEHICLE, new Jolt.BroadPhaseLayer(1));
 
   const settings = new Jolt.JoltSettings();
   settings.mObjectLayerPairFilter = objectFilter;
@@ -94,6 +100,8 @@ export async function createWorld() {
 
   const vec = (v) => new Jolt.Vec3(v[0], v[1], v[2]);
   const rvec = (v) => new Jolt.RVec3(v[0], v[1], v[2]);
+  const joltVec3 = (v) => [v.GetX(), v.GetY(), v.GetZ()];
+  const joltQuat = (q) => [q.GetX(), q.GetY(), q.GetZ(), q.GetW()];
   let terrainRecipe = null;
   const terrainHeightAt = (x, z) => terrainRecipe ? sampleTerrainHeight(terrainRecipe.seed, x, z, terrainRecipe.params) : 0;
 
@@ -111,9 +119,11 @@ export async function createWorld() {
     return body;
   };
   const createTerrainFloor = (terrain) => {
-    const settings = new Jolt.HeightFieldShapeSettings();
-    const samples = new Jolt.ArrayFloat();
+    let settings = new Jolt.HeightFieldShapeSettings();
+    let samples = new Jolt.ArrayFloat();
     let result = null;
+    let shape = null;
+    let shapeOwned = false;
     let bodySettings = null;
     let body = null;
     try {
@@ -137,7 +147,15 @@ export async function createWorld() {
       settings.mHeightSamples = samples;
       result = settings.Create();
       if (!result.IsValid()) throw new Error("Jolt could not build the terrain heightfield");
-      const shape = result.Get();
+      shape = result.Get();
+      shape.AddRef();
+      shapeOwned = true;
+      result.Clear();
+      result = null;
+      Jolt.destroy(settings);
+      settings = null;
+      Jolt.destroy(samples);
+      samples = null;
       bodySettings = new Jolt.BodyCreationSettings(
         shape,
         rvec([0, 0, 0]),
@@ -145,6 +163,9 @@ export async function createWorld() {
         Jolt.EMotionType_Static,
         LAYER_STATIC,
       );
+      shape.Release();
+      shapeOwned = false;
+      shape = null;
       body = bodies.CreateBody(bodySettings);
       if (!body) throw new Error("Jolt could not allocate the terrain body");
       bodies.AddBody(body.GetID(), Jolt.EActivation_DontActivate);
@@ -156,10 +177,11 @@ export async function createWorld() {
       }
       throw error;
     } finally {
+      if (shapeOwned) shape.Release();
       if (bodySettings) Jolt.destroy(bodySettings);
-      if (result) Jolt.destroy(result);
-      Jolt.destroy(settings);
-      Jolt.destroy(samples);
+      if (result) result.Clear();
+      if (settings) Jolt.destroy(settings);
+      if (samples) Jolt.destroy(samples);
     }
   };
   let floorBody = createFlatFloor();
@@ -440,7 +462,335 @@ export async function createWorld() {
 
   // ---------------------------------------------------------------- characters and ray casts
 
-  const world = { characters: [], ball, obstacles: OBSTACLES, terrain: null, terrainHeightAt, ctx: { Jolt, bodies, physics } };
+  const world = { characters: [], vehicles: [], ball, obstacles: OBSTACLES, terrain: null, terrainHeightAt, ctx: { Jolt, bodies, physics } };
+
+  world.createVehicle = (asset, position, { yaw = 0 } = {}) => {
+    if (asset?.spec?.type !== "car" || asset.spec.motion?.kind !== "vehicle" || asset.spec.collider?.kind !== "compound") {
+      throw new TypeError("A vehicle needs a generated car asset with a wheel recipe and compound collider");
+    }
+    if (!Array.isArray(position) || position.length !== 3 || !position.every(Number.isFinite) || !Number.isFinite(yaw)) {
+      throw new TypeError("Vehicle position and yaw must be finite");
+    }
+    const wheelSpecs = [...asset.spec.motion.wheels]
+      .sort((a, b) => b.position[2] - a.position[2] || a.position[0] - b.position[0]);
+    if (wheelSpecs.length !== 4 || wheelSpecs.some((wheel) => !Array.isArray(wheel.position) || wheel.position.length !== 3 || !wheel.position.every(Number.isFinite) || !Number.isFinite(wheel.radius) || !Number.isFinite(wheel.width))) {
+      throw new TypeError("A drivable car needs four finite wheel mount recipes");
+    }
+
+    let shapeSettings = new Jolt.StaticCompoundShapeSettings();
+    let childShapeSettings = [];
+    let shapeResult = null;
+    let shape = null;
+    let shapeOwned = false;
+    let bodySettings = null;
+    let body = null;
+    let constraint = null;
+    let constraintAdded = false;
+    let collisionTester = null;
+    let stepListener = null;
+    let stepListenerAdded = false;
+    let controller = null;
+    let constraintCallbacks = null;
+    let controllerCallbacks = null;
+    let vehicleSettings = null;
+    let controllerSettings = null;
+    let rearDrive = null;
+    let controllerSettingsTransferred = false;
+    const identity = Jolt.Quat.prototype.sIdentity();
+    try {
+      for (const child of asset.spec.collider.children) {
+        if (child.kind !== "box" || !Array.isArray(child.center) || !Array.isArray(child.half) || !child.center.every(Number.isFinite) || !child.half.every((value) => Number.isFinite(value) && value > 0)) {
+          throw new TypeError("Car collider children must be finite boxes");
+        }
+        const childHalf = vec(child.half);
+        const childSettings = new Jolt.BoxShapeSettings(childHalf);
+        childShapeSettings.push(childSettings);
+        const childPosition = vec(child.center);
+        shapeSettings.AddShape(childPosition, identity, childSettings, 0);
+        childShapeSettings.pop();
+        Jolt.destroy(childHalf);
+        Jolt.destroy(childPosition);
+      }
+      shapeResult = shapeSettings.Create();
+      if (!shapeResult.IsValid()) throw new Error("Jolt could not build the car collider");
+      shape = shapeResult.Get();
+      shape.AddRef();
+      shapeOwned = true;
+      shapeResult.Clear();
+      shapeResult = null;
+      Jolt.destroy(shapeSettings);
+      shapeSettings = null;
+      const rotation = new Jolt.Quat(0, Math.sin(yaw * 0.5), 0, Math.cos(yaw * 0.5));
+      const bodyPosition = rvec(position);
+      bodySettings = new Jolt.BodyCreationSettings(
+        shape,
+        bodyPosition,
+        rotation,
+        Jolt.EMotionType_Dynamic,
+        LAYER_VEHICLE,
+      );
+      Jolt.destroy(bodyPosition);
+      shape.Release();
+      shapeOwned = false;
+      shape = null;
+      const size = asset.spec.params?.size ?? 1;
+      bodySettings.mOverrideMassProperties = Jolt.EOverrideMassProperties_CalculateInertia;
+      bodySettings.mMassPropertiesOverride.mMass = 1200 * size * size * size;
+      bodySettings.mFriction = 0.82;
+      bodySettings.mRestitution = 0.02;
+      bodySettings.mLinearDamping = 0.025;
+      bodySettings.mAngularDamping = 0.12;
+      bodySettings.mMotionQuality = Jolt.EMotionQuality_LinearCast;
+      bodySettings.mMaxLinearVelocity = 48;
+      body = bodies.CreateBody(bodySettings);
+      if (!body) throw new Error("Jolt could not allocate the vehicle body");
+      bodies.AddBody(body.GetID(), Jolt.EActivation_Activate);
+      Jolt.destroy(bodySettings);
+      bodySettings = null;
+      Jolt.destroy(rotation);
+
+      vehicleSettings = new Jolt.VehicleConstraintSettings();
+      const vehicleUp = vec([0, 1, 0]);
+      const vehicleForward = vec([0, 0, 1]);
+      vehicleSettings.mUp = vehicleUp;
+      vehicleSettings.mForward = vehicleForward;
+      Jolt.destroy(vehicleUp);
+      Jolt.destroy(vehicleForward);
+      vehicleSettings.mMaxPitchRollAngle = Math.PI * 0.38;
+      const wheelSettingsArray = vehicleSettings.mWheels;
+      wheelSettingsArray.clear();
+      for (const wheel of wheelSpecs) {
+        const wheelSettings = new Jolt.WheelSettingsWV();
+        const localPosition = vec([
+          wheel.position[0],
+          wheel.position[1],
+          wheel.position[2],
+        ]);
+        wheelSettings.mPosition = localPosition;
+        const suspensionDirection = vec([0, -1, 0]);
+        const steeringAxis = vec([0, 1, 0]);
+        const wheelUp = vec([0, 1, 0]);
+        const wheelForward = vec([0, 0, 1]);
+        wheelSettings.mSuspensionDirection = suspensionDirection;
+        wheelSettings.mSteeringAxis = steeringAxis;
+        wheelSettings.mWheelUp = wheelUp;
+        wheelSettings.mWheelForward = wheelForward;
+        wheelSettings.mRadius = wheel.radius;
+        wheelSettings.mWidth = wheel.width;
+        wheelSettings.mSuspensionMinLength = 0.07 * size;
+        wheelSettings.mSuspensionMaxLength = 0.42 * size;
+        wheelSettings.mSuspensionPreloadLength = 0.13 * size;
+        wheelSettings.mMaxSteerAngle = wheel.steering ? asset.spec.motion.steering.maxAngle : 0;
+        wheelSettings.mMaxBrakeTorque = 1700 * size;
+        wheelSettings.mMaxHandBrakeTorque = wheel.position[2] < 0 ? 2600 * size : 0;
+        const spring = new Jolt.SpringSettings();
+        spring.mMode = Jolt.ESpringMode_FrequencyAndDamping;
+        spring.mFrequency = 2.4;
+        spring.mDamping = 0.82;
+        wheelSettings.mSuspensionSpring = spring;
+        Jolt.destroy(spring);
+        wheelSettingsArray.push_back(wheelSettings);
+        Jolt.destroy(localPosition);
+        Jolt.destroy(suspensionDirection);
+        Jolt.destroy(steeringAxis);
+        Jolt.destroy(wheelUp);
+        Jolt.destroy(wheelForward);
+      }
+
+      controllerSettings = new Jolt.WheeledVehicleControllerSettings();
+      const engine = controllerSettings.mEngine;
+      engine.mMaxTorque = 500 * size * size * size;
+      engine.mMaxRPM = 6200;
+      const transmission = controllerSettings.mTransmission;
+      transmission.mClutchStrength = 10 * size * size * size;
+      transmission.mSwitchTime = 0.28;
+      const differentials = controllerSettings.mDifferentials;
+      differentials.clear();
+      rearDrive = new Jolt.VehicleDifferentialSettings();
+      rearDrive.mLeftWheel = 2;
+      rearDrive.mRightWheel = 3;
+      rearDrive.mDifferentialRatio = 3.42;
+      rearDrive.mLeftRightSplit = 0.5;
+      rearDrive.mLimitedSlipRatio = 1.4;
+      rearDrive.mEngineTorqueRatio = 1;
+      differentials.push_back(rearDrive);
+      Jolt.destroy(rearDrive);
+      rearDrive = null;
+      controllerSettings.mDifferentialLimitedSlipRatio = 1.4;
+      vehicleSettings.mController = controllerSettings;
+      controllerSettingsTransferred = true;
+
+      const antiRollBars = vehicleSettings.mAntiRollBars;
+      antiRollBars.clear();
+      for (const [left, right, stiffness] of [[0, 1, 6500], [2, 3, 5200]]) {
+        const bar = new Jolt.VehicleAntiRollBar();
+        bar.mLeftWheel = left;
+        bar.mRightWheel = right;
+        bar.mStiffness = stiffness;
+        antiRollBars.push_back(bar);
+        Jolt.destroy(bar);
+      }
+
+      constraint = new Jolt.VehicleConstraint(body, vehicleSettings);
+      const collisionUp = vec([0, 1, 0]);
+      collisionTester = new Jolt.VehicleCollisionTesterRay(LAYER_VEHICLE, collisionUp, Math.PI / 4);
+      Jolt.destroy(collisionUp);
+      constraint.SetVehicleCollisionTester(collisionTester);
+      constraintCallbacks = new Jolt.VehicleConstraintCallbacksJS();
+      constraintCallbacks.GetCombinedFriction = (_wheelIndex, _tireFrictionDirection, tireFriction, body2Pointer) => {
+        const body2 = Jolt.wrapPointer(body2Pointer, Jolt.Body);
+        return Math.sqrt(tireFriction * body2.GetFriction());
+      };
+      constraintCallbacks.OnPreStepCallback = () => {};
+      constraintCallbacks.OnPostCollideCallback = () => {};
+      constraintCallbacks.OnPostStepCallback = () => {};
+      constraintCallbacks.SetVehicleConstraint(constraint);
+      physics.AddConstraint(constraint);
+      constraintAdded = true;
+      stepListener = new Jolt.VehicleConstraintStepListener(constraint);
+      physics.AddStepListener(stepListener);
+      stepListenerAdded = true;
+
+      controller = Jolt.castObject(constraint.GetController(), Jolt.WheeledVehicleController);
+      controllerCallbacks = new Jolt.WheeledVehicleControllerCallbacksJS();
+      controllerCallbacks.OnTireMaxImpulseCallback = (_wheelIndex, resultPointer, suspensionImpulse, longitudinalFriction, lateralFriction) => {
+        const result = Jolt.wrapPointer(resultPointer, Jolt.TireMaxImpulseCallbackResult);
+        result.mLongitudinalImpulse = longitudinalFriction * suspensionImpulse;
+        result.mLateralImpulse = lateralFriction * suspensionImpulse;
+      };
+      controllerCallbacks.SetWheeledVehicleController(controller);
+      const wheelRight = vec([1, 0, 0]);
+      const wheelUp = vec([0, 1, 0]);
+      const input = { forward: 0, right: 0, brake: 0, handBrake: 0 };
+      let previousForward = 1;
+      let disposedVehicle = false;
+      const read = () => {
+        const bodyPosition = body.GetPosition();
+        const bodyRotation = body.GetRotation();
+        const velocity = body.GetLinearVelocity();
+        const rotationArray = joltQuat(bodyRotation);
+        const bodyPositionArray = joltVec3(bodyPosition);
+        const forward = qRot(rotationArray, [0, 0, 1]);
+        const result = {
+          x: bodyPositionArray[0],
+          y: bodyPositionArray[1],
+          z: bodyPositionArray[2],
+          yaw: Math.atan2(forward[0], forward[2]),
+          vx: velocity.GetX(),
+          vy: velocity.GetY(),
+          vz: velocity.GetZ(),
+        };
+        result.speed = Math.hypot(result.vx, result.vy, result.vz);
+        return result;
+      };
+      const setInput = ({ forward = 0, right = 0, brake = 0, handBrake = 0 } = {}) => {
+        if (disposedVehicle) return;
+        forward = Math.max(-1, Math.min(1, Number.isFinite(forward) ? forward : 0));
+        right = Math.max(-1, Math.min(1, Number.isFinite(right) ? right : 0));
+        brake = Math.max(0, Math.min(1, Number.isFinite(brake) ? brake : 0));
+        handBrake = Math.max(0, Math.min(1, Number.isFinite(handBrake) ? handBrake : 0));
+        if (handBrake > 0) forward = 0;
+        if (previousForward * forward < 0) {
+          const rotation = body.GetRotation();
+          const velocity = body.GetLinearVelocity();
+          const localVelocity = qRot(qConj(joltQuat(rotation)), joltVec3(velocity));
+          if ((forward > 0 && localVelocity[2] < -0.1) || (forward < 0 && localVelocity[2] > 0.1)) {
+            forward = 0;
+            brake = 1;
+          } else previousForward = forward;
+        } else if (forward !== 0) previousForward = forward;
+        controller.SetDriverInput(forward, -right, brake, handBrake);
+        Object.assign(input, { forward, right, brake, handBrake });
+        if (forward || right || brake || handBrake) bodies.ActivateBody(body.GetID());
+      };
+      const renderState = () => {
+        const bodyPosition = body.GetPosition();
+        const bodyRotation = body.GetRotation();
+        const position = joltVec3(bodyPosition);
+        const rotation = joltQuat(bodyRotation);
+        const wheels = [];
+        for (let index = 0; index < wheelSpecs.length; index++) {
+          const localTransform = constraint.GetWheelLocalTransform(index, wheelRight, wheelUp);
+          const localPosition = localTransform.GetTranslation();
+          const localRotation = localTransform.GetQuaternion();
+          const translated = qRot(rotation, joltVec3(localPosition));
+          wheels.push({
+            position: [position[0] + translated[0], position[1] + translated[1], position[2] + translated[2]],
+            rotation: qMul(rotation, joltQuat(localRotation)),
+          });
+        }
+        return { position, rotation, wheels, input: { ...input } };
+      };
+      const teleport = (at, nextYaw = 0) => {
+        if (!Array.isArray(at) || at.length !== 3 || !at.every(Number.isFinite) || !Number.isFinite(nextYaw)) {
+          throw new TypeError("Vehicle teleport needs a finite position and yaw");
+        }
+        const nextRotation = new Jolt.Quat(0, Math.sin(nextYaw * 0.5), 0, Math.cos(nextYaw * 0.5));
+        const nextPosition = rvec(at);
+        bodies.SetPositionAndRotation(body.GetID(), nextPosition, nextRotation, Jolt.EActivation_Activate);
+        const zero = vec([0, 0, 0]);
+        bodies.SetLinearAndAngularVelocity(body.GetID(), zero, zero);
+        controller.SetDriverInput(0, 0, 0, 0);
+        Object.assign(input, { forward: 0, right: 0, brake: 0, handBrake: 0 });
+        previousForward = 1;
+        Jolt.destroy(zero);
+        Jolt.destroy(nextPosition);
+        Jolt.destroy(nextRotation);
+      };
+      const dispose = () => {
+        if (disposedVehicle) return;
+        disposedVehicle = true;
+        if (stepListenerAdded) physics.RemoveStepListener(stepListener);
+        Jolt.destroy(stepListener);
+        stepListenerAdded = false;
+        physics.RemoveConstraint(constraint);
+        constraintAdded = false;
+        constraint = null;
+        collisionTester = null;
+        Jolt.destroy(constraintCallbacks);
+        Jolt.destroy(controllerCallbacks);
+        Jolt.destroy(vehicleSettings);
+        vehicleSettings = null;
+        bodies.RemoveBody(body.GetID());
+        bodies.DestroyBody(body.GetID());
+        const index = world.vehicles.indexOf(vehicle);
+        if (index >= 0) world.vehicles.splice(index, 1);
+        Jolt.destroy(wheelRight);
+        Jolt.destroy(wheelUp);
+      };
+      const vehicle = { asset, body, spec: asset.spec, read, setInput, renderState, teleport, dispose };
+      world.vehicles.push(vehicle);
+      return vehicle;
+    } catch (error) {
+      if (stepListener) {
+        if (stepListenerAdded) physics.RemoveStepListener(stepListener);
+        Jolt.destroy(stepListener);
+      }
+      if (constraint) {
+        if (constraintAdded) physics.RemoveConstraint(constraint);
+        else Jolt.destroy(constraint);
+        constraint = null;
+        collisionTester = null;
+      }
+      if (constraintCallbacks) Jolt.destroy(constraintCallbacks);
+      if (controllerCallbacks) Jolt.destroy(controllerCallbacks);
+      if (body) {
+        bodies.RemoveBody(body.GetID());
+        bodies.DestroyBody(body.GetID());
+      }
+      if (collisionTester) Jolt.destroy(collisionTester);
+      if (vehicleSettings) Jolt.destroy(vehicleSettings);
+      if (controllerSettings && !controllerSettingsTransferred) Jolt.destroy(controllerSettings);
+      if (bodySettings) Jolt.destroy(bodySettings);
+      if (shapeResult) shapeResult.Clear();
+      if (shapeOwned) shape.Release();
+      if (shapeSettings) Jolt.destroy(shapeSettings);
+      for (const childSettings of childShapeSettings) Jolt.destroy(childSettings);
+      throw error;
+    }
+  };
+
+  world.removeVehicle = (vehicle) => vehicle?.dispose?.();
 
   world.setTerrain = (input) => {
     const nextTerrain = normalizeTerrainRecipe(input);

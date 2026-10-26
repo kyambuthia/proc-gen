@@ -24,6 +24,7 @@ export function createCar(seed, { paint = "lagoon", size = 1 } = {}) {
   const trim = trimPalette[Math.floor(rng() * trimPalette.length)];
   const s = size;
   const mesh = new MeshBuilder();
+  const wheelMesh = new MeshBuilder();
   const box = (center, half, color) => mesh.addBox(center.map((v) => v * s), half.map((v) => v * s), color);
   const ellipsoid = (center, radii, color) => mesh.addEllipsoid(center.map((v) => v * s), radii.map((v) => v * s), color, 8, 5, 0);
 
@@ -55,32 +56,24 @@ export function createCar(seed, { paint = "lagoon", size = 1 } = {}) {
   const wheelRadius = 0.35;
   const wheelWidth = 0.22;
   const wheelMounts = [];
+  wheelMesh.addCylinder([-wheelWidth * 0.5, 0, 0], [wheelWidth * 0.5, 0, 0], wheelRadius, wheelRadius, 10, RUBBER);
+  wheelMesh.addCylinder([-wheelWidth * 0.62, 0, 0], [-wheelWidth * 0.49, 0, 0], wheelRadius * 0.56, wheelRadius * 0.56, 8, METAL);
+  wheelMesh.addCylinder([wheelWidth * 0.49, 0, 0], [wheelWidth * 0.62, 0, 0], wheelRadius * 0.56, wheelRadius * 0.56, 8, METAL);
   for (const side of [-1, 1]) {
     for (const axle of [-1, 1]) {
       const x = side * 0.86;
       const y = wheelRadius + 0.01;
       const z = axle * 1.28;
-      mesh.addCylinder(
-        [(x - side * wheelWidth * 0.5) * s, y * s, z * s],
-        [(x + side * wheelWidth * 0.5) * s, y * s, z * s],
-        wheelRadius * s,
-        wheelRadius * s,
-        10,
-        RUBBER,
-      );
-      mesh.addCylinder(
-        [(x + side * wheelWidth * 0.5) * s, y * s, z * s],
-        [(x + side * (wheelWidth * 0.5 + 0.025)) * s, y * s, z * s],
-        wheelRadius * 0.56 * s,
-        wheelRadius * 0.56 * s,
-        8,
-        METAL,
-      );
       wheelMounts.push({ position: [x * s, y * s, z * s], radius: wheelRadius * s, width: wheelWidth * s, steering: axle > 0 });
     }
   }
 
-  const geometry = mesh.build();
+  const bodyGeometry = mesh.build();
+  const wheelGeometry = wheelMesh.build();
+  const completeMesh = new MeshBuilder();
+  completeMesh.append(bodyGeometry);
+  for (const wheel of wheelMounts) completeMesh.append(wheelGeometry, wheel.position, s);
+  const geometry = completeMesh.build();
   return {
     spec: {
       type: "car",
@@ -104,6 +97,7 @@ export function createCar(seed, { paint = "lagoon", size = 1 } = {}) {
       },
     },
     bounds: { min: [-1.1 * s, 0, -2.13 * s], max: [1.1 * s, 1.66 * s, 2.13 * s] },
+    parts: { body: bodyGeometry, wheel: wheelGeometry },
     geometry,
   };
 }

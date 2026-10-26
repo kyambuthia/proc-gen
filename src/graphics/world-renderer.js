@@ -81,7 +81,9 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
   const gingerCat = getMesh("cat:ginger", () => createAsset("cat", seed, { coat: "ginger" }).geometry);
   const charcoalCat = getMesh("cat:charcoal", () => createAsset("cat", `${seed}:night`, { coat: "charcoal", size: 0.9 }).geometry);
   const rat = getMesh("rat:russet", () => createAsset("rat", `${seed}:park-rat`, { coat: "russet", size: 0.55 }).geometry);
-  const car = getMesh("car", () => createAsset("car", seed, { paint: "lagoon" }).geometry);
+  const carAsset = createAsset("car", `${seed}:driveable-car`, { paint: "lagoon" });
+  const carBody = getMesh("car:body", () => carAsset.parts.body);
+  const carWheel = getMesh("car:wheel", () => carAsset.parts.wheel);
   const bicycle = getMesh("bicycle", () => createAsset("bicycle", seed, { style: "city", paint: "citron" }).geometry);
   let humanTemplates = createAsset("human", `${seed}:human-template`, { style: "street", palette: "lagoon", hairStyle: "crop" }).parts;
   const humanParts = Object.fromEntries(["torso", "head", "upperArm", "foreArm", "thigh", "shin"].map((part) => [
@@ -157,7 +159,10 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
       const j = Math.floor(rng() * (i + 1));
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
     }
-    const occupied = [];
+    const occupied = (world.vehicles ?? []).map((vehicle) => {
+      const state = vehicle.read();
+      return { position: [state.x, state.z], half: [2.3, 2.7] };
+    });
     const take = (half) => {
       const position = candidates.find(([x, z]) => {
         const spawnArea = Math.abs(x) < 8 && z > -4 && z < 8;
@@ -178,7 +183,6 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
       return [chosen[0], 0, chosen[1]];
     };
     return {
-      car: take([2.3, 2.7]),
       ginger: take([1.4, 1.4]),
       charcoal: take([1.5, 1.2]),
       bicycle: take([0.4, 1.15]),
@@ -259,6 +263,13 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
       }
     }
 
+    for (const vehicle of world.vehicles ?? []) {
+      const state = vehicle.renderState();
+      const size = vehicle.spec.params?.size ?? 1;
+      add(carBody, transform4(state.position, state.rotation), WHITE);
+      for (const wheel of state.wheels) add(carWheel, transform4(wheel.position, wheel.rotation, [size, size, size]), WHITE);
+    }
+
     const ballPosition = world.ball.position();
     add(sphere, transform4(ballPosition, [0, 0, 0, 1], [world.ball.radius, world.ball.radius, world.ball.radius]), [0.96, 0.42, 0.17]);
     if (!hasOsmTerrain) add(floor, transform4([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]), WHITE);
@@ -271,7 +282,6 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
       add(gingerCat, transform4(decorations.ginger, yawRotation(-0.7), [1, 1, 1]), WHITE);
       add(charcoalCat, transform4(decorations.charcoal, yawRotation(1.2), [1, 1, 1]), WHITE);
       add(rat, transform4(decorations.rat, yawRotation(-2.1), [1, 1, 1]), WHITE);
-      add(car, transform4(decorations.car, yawRotation(-0.45), [1, 1, 1]), WHITE);
       add(bicycle, transform4(decorations.bicycle, yawRotation(0.85), [1, 1, 1]), WHITE);
     }
 

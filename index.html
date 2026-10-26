@@ -124,16 +124,18 @@
     <aside class="controls">
       <strong>Move</strong> WASD · <strong>run</strong> Shift · <strong>jump</strong> Space · <strong>fire / throw</strong> click<br />
       <strong>fight</strong> F punch · K kick · G carry ball · R go limp / recover<br />
+      <strong>drive</strong> C enter / exit near the car · WASD steer · Space brake · Shift handbrake<br />
       <strong>world</strong> drag to look · wheel zoom · E add people · H hostility · V waves · P pause · ` detail
     </aside>
     <div class="mobile-controls" aria-label="Touch controls">
       <div id="move-stick" aria-label="Move joystick"><div id="stick-knob"></div></div>
       <div id="touch-actions">
         <button type="button" data-action="shoot" aria-label="Fire or throw">FIRE</button>
-        <button type="button" data-hold="Space" aria-label="Jump">JUMP</button>
+        <button id="touch-jump" type="button" data-hold="Space" aria-label="Jump">JUMP</button>
         <button type="button" data-action="punch" aria-label="Punch">PUNCH</button>
         <button type="button" data-action="kick" aria-label="Kick">KICK</button>
         <button type="button" data-action="ball" aria-label="Pick up or drop ball">BALL</button>
+        <button type="button" data-action="drive" aria-label="Enter or exit the car">DRIVE</button>
       </div>
     </div>
     <div id="fault" role="alert" hidden></div>
