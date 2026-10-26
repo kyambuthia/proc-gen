@@ -8,14 +8,17 @@ const PALETTES = {
   meadow: {
     grass: [[0.19, 0.43, 0.16], [0.34, 0.58, 0.19], [0.55, 0.66, 0.23], [0.15, 0.5, 0.36]],
     flower: [[0.98, 0.68, 0.24], [0.95, 0.39, 0.55], [0.9, 0.84, 0.6], [0.62, 0.48, 0.86]],
+    litter: [[0.31, 0.42, 0.21], [0.49, 0.51, 0.25], [0.91, 0.65, 0.65]],
   },
   forest: {
     grass: [[0.09, 0.28, 0.17], [0.16, 0.4, 0.21], [0.28, 0.48, 0.24], [0.14, 0.38, 0.32]],
     flower: [[0.92, 0.74, 0.36], [0.78, 0.44, 0.6], [0.82, 0.86, 0.65], [0.47, 0.62, 0.72]],
+    litter: [[0.25, 0.35, 0.19], [0.42, 0.39, 0.2], [0.58, 0.34, 0.2]],
   },
   autumn: {
     grass: [[0.25, 0.37, 0.14], [0.52, 0.5, 0.15], [0.74, 0.48, 0.13], [0.57, 0.3, 0.14]],
     flower: [[0.96, 0.67, 0.18], [0.86, 0.27, 0.19], [0.93, 0.56, 0.35], [0.69, 0.39, 0.56]],
+    litter: [[0.77, 0.34, 0.12], [0.9, 0.57, 0.12], [0.61, 0.19, 0.13], [0.92, 0.72, 0.22]],
   },
 };
 
@@ -75,6 +78,25 @@ function addLeaf(mesh, base, tip, width, color, wind = 0.7) {
   emit(base, tip, right);
   emit(base, left, tip, true);
   emit(base, tip, right, true);
+}
+
+function addFallenLeaf(mesh, x, z, baseY, angle, length, width, color, terrainSeed, terrainParams) {
+  const direction = [Math.cos(angle), Math.sin(angle)];
+  const side = [-direction[1] * width, direction[0] * width];
+  const tipX = x + direction[0] * length;
+  const tipZ = z + direction[1] * length;
+  const leftX = x + direction[0] * length * 0.48 + side[0];
+  const leftZ = z + direction[1] * length * 0.48 + side[1];
+  const rightX = x + direction[0] * length * 0.48 - side[0];
+  const rightZ = z + direction[1] * length * 0.48 - side[1];
+  const heightAt = (leafX, leafZ) => (terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, leafX, leafZ, terrainParams)) + 0.018;
+  const base = [x, baseY + 0.018, z];
+  const left = [leftX, heightAt(leftX, leftZ), leftZ];
+  const tip = [tipX, heightAt(tipX, tipZ), tipZ];
+  const right = [rightX, heightAt(rightX, rightZ), rightZ];
+  const below = [x, baseY - 0.16, z];
+  mesh.addFlatTriangle([base, left, tip], color, below, 0.05);
+  mesh.addFlatTriangle([base, tip, right], color.map((channel) => Math.min(1, channel * 1.12 + 0.02)), below, 0.05);
 }
 
 function gaussian(rng) {
@@ -197,11 +219,12 @@ export function createGroundcover(seed, {
   let bladeCount = 0;
   let leafCount = 0;
   let foliageClumps = 0;
+  let litterLeaves = 0;
   let renderedClumps = 0;
   for (const point of positions) {
     const vertexStart = mesh.vertices.length;
     const indexStart = mesh.indices.length;
-    const countsBefore = [flowerCount, fernCount, shrubCount, rosetteCount, bladeCount, leafCount, foliageClumps];
+    const countsBefore = [flowerCount, fernCount, shrubCount, rosetteCount, bladeCount, leafCount, foliageClumps, litterLeaves];
     const blades = 3 + Math.floor(rng() * 3);
     const clumpRadius = 0.2 + rng() * 0.22;
     const foliageKind = rng();
@@ -303,10 +326,23 @@ export function createGroundcover(seed, {
       flowerCount++;
     }
 
+    const litterChance = biome === "autumn" ? 0.34 : biome === "forest" ? 0.14 : 0.055;
+    if (rng() < litterChance) {
+      const litterX = point.x + (rng() - 0.5) * 0.26;
+      const litterZ = point.z + (rng() - 0.5) * 0.26;
+      const litterY = terrainSeed === null ? 0 : sampleTerrainHeight(terrainSeed, litterX, litterZ, terrainParams);
+      addFallenLeaf(
+        mesh, litterX, litterZ, litterY,
+        rng() * Math.PI * 2, 0.2 + rng() * 0.21, 0.065 + rng() * 0.045,
+        choose(rng, palette.litter), terrainSeed, terrainParams,
+      );
+      litterLeaves++;
+    }
+
     if (mesh.vertices.length / VERTEX_STRIDE > 65535) {
       mesh.vertices.length = vertexStart;
       mesh.indices.length = indexStart;
-      [flowerCount, fernCount, shrubCount, rosetteCount, bladeCount, leafCount, foliageClumps] = countsBefore;
+      [flowerCount, fernCount, shrubCount, rosetteCount, bladeCount, leafCount, foliageClumps, litterLeaves] = countsBefore;
       break;
     }
     renderedClumps++;
@@ -334,6 +370,7 @@ export function createGroundcover(seed, {
         shrubClumps: shrubCount,
         rosetteClumps: rosetteCount,
         foliageClumps,
+        litterLeaves,
         flowers: flowerCount,
         blades: bladeCount,
         bladesApprox: bladeCount,

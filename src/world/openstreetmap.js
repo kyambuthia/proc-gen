@@ -2,7 +2,7 @@ import { encodeRiverSurface, MeshBuilder, SURFACE_DEFAULT, SURFACE_WATER } from 
 import { createRng, hashSeed } from "../procedural/seed.js";
 import { createAsset } from "../procedural/assets.js";
 import { TREE_VARIANTS } from "../procedural/tree.js";
-import { sampleTerrainHeight } from "../procedural/terrain.js";
+import { sampleTerrainHeight, sampleTerrainSlope } from "../procedural/terrain.js";
 
 const METERS_PER_LATITUDE_DEGREE = 111132;
 const MAX_SCENE_VERTICES = 60000;
@@ -602,13 +602,15 @@ function compileMeshes(features, seed, terrain = null) {
     if (target <= 0) continue;
     const random = createRng(deriveFeatureSeed(seed, `tree-layout:${feature.id}`));
     const patchCount = Math.max(1, Math.min(8, Math.ceil(target / 4)));
-    const patchSpread = Math.min(maxX - minX, maxZ - minZ) / Math.sqrt(patchCount) * 0.34;
+    const patchSpreadX = Math.max(0.8, (maxX - minX) / Math.sqrt(patchCount) * 0.34);
+    const patchSpreadZ = Math.max(0.8, (maxZ - minZ) / Math.sqrt(patchCount) * 0.34);
     const patches = [];
     for (let patch = 0; patch < patchCount; patch++) {
       for (let attempt = 0; attempt < 80; attempt++) {
         const center = [minX + random() * (maxX - minX), minZ + random() * (maxZ - minZ)];
         if (!pointInPolygon(center, feature.polygon) || pointNearPaths(center, nearbyRoads, 1.3)) continue;
         if (occupiedByBuildings.some((box) => center[0] >= box.minX && center[0] <= box.maxX && center[1] >= box.minZ && center[1] <= box.maxZ)) continue;
+        if (patches.some((other) => pointDistanceSquared(center, other.center) < (spacing * 0.55) ** 2)) continue;
         patches.push({ center, variant: TREE_VARIANTS[Math.floor(random() * TREE_VARIANTS.length)] });
         break;
       }
@@ -619,11 +621,13 @@ function compileMeshes(features, seed, terrain = null) {
       const patch = patches[placedInFeature < patches.length ? placedInFeature : Math.floor(random() * patches.length)];
       const point = random() < 0.18
         ? [minX + random() * (maxX - minX), minZ + random() * (maxZ - minZ)]
-        : [patch.center[0] + gaussian(random) * patchSpread, patch.center[1] + gaussian(random) * patchSpread];
+        : [patch.center[0] + gaussian(random) * patchSpreadX, patch.center[1] + gaussian(random) * patchSpreadZ];
       if (!pointInPolygon(point, feature.polygon)) continue;
       if (occupiedByBuildings.some((box) => point[0] >= box.minX && point[0] <= box.maxX && point[1] >= box.minZ && point[1] <= box.maxZ)) continue;
       if (pointNearPaths(point, nearbyRoads, 1.3)) continue;
-      if (treeLocations.some((other) => pointDistanceSquared(point, other) < (spacing * 0.62) ** 2)) continue;
+      if (terrain && sampleTerrainSlope(terrain.seed, point[0], point[1], terrain.params, 1.2) > 1.15) continue;
+      const clearance = spacing * (0.53 + random() * 0.14);
+      if (treeLocations.some((other) => pointDistanceSquared(point, other) < clearance ** 2)) continue;
       const variant = random() < 0.72 ? patch.variant : TREE_VARIANTS[Math.floor(random() * TREE_VARIANTS.length)];
       const tree = createAsset("tree", deriveFeatureSeed(seed, `tree:${feature.id}:${treeCount}`), { variant });
       const vertices = tree.geometry.vertices.length / tree.geometry.stride;

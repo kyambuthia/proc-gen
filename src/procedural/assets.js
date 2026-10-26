@@ -19,7 +19,7 @@ export {
   serializeAsset,
 } from "./asset-registry.js";
 export { createGrove, createTree } from "./tree.js";
-export { createTerrain, sampleTerrainHeight } from "./terrain.js";
+export { createTerrain, sampleTerrainHeight, sampleTerrainSlope } from "./terrain.js";
 export { createGroundcover } from "./groundcover.js";
 export { createRock, createRockField } from "./rock.js";
 export { createCat } from "./cat.js";

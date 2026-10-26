@@ -70,6 +70,18 @@ export function sampleTerrainHeight(seed, x, z, { amplitude = 1, biome = "meadow
   return (broad + hills + detail + ridge - valley - 0.28) * amplitude * biomeScale;
 }
 
+// Finite-difference slope is shared by vegetation placement so roots avoid near-cliffs.
+export function sampleTerrainSlope(seed, x, z, params = {}, step = 1) {
+  if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(step) || step <= 0) {
+    throw new TypeError("Terrain slope needs finite coordinates and a positive sample step");
+  }
+  const east = sampleTerrainHeight(seed, x + step, z, params);
+  const west = sampleTerrainHeight(seed, x - step, z, params);
+  const south = sampleTerrainHeight(seed, x, z + step, params);
+  const north = sampleTerrainHeight(seed, x, z - step, params);
+  return Math.hypot((east - west) / (2 * step), (south - north) / (2 * step));
+}
+
 function faceNormal([a, b, c]) {
   const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
   const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
