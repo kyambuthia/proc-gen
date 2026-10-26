@@ -80,6 +80,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
   }).geometry);
   const gingerCat = getMesh("cat:ginger", () => createAsset("cat", seed, { coat: "ginger" }).geometry);
   const charcoalCat = getMesh("cat:charcoal", () => createAsset("cat", `${seed}:night`, { coat: "charcoal", size: 0.9 }).geometry);
+  const rat = getMesh("rat:russet", () => createAsset("rat", `${seed}:park-rat`, { coat: "russet", size: 0.55 }).geometry);
   const car = getMesh("car", () => createAsset("car", seed, { paint: "lagoon" }).geometry);
   const bicycle = getMesh("bicycle", () => createAsset("bicycle", seed, { style: "city", paint: "citron" }).geometry);
   let humanTemplates = createAsset("human", `${seed}:human-template`, { style: "street", palette: "lagoon", hairStyle: "crop" }).parts;
@@ -180,6 +181,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
       ginger: take([1.4, 1.4]),
       charcoal: take([1.5, 1.2]),
       bicycle: take([0.4, 1.15]),
+      rat: take([0.45, 0.55]),
     };
   }
 
@@ -266,6 +268,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
       const yawRotation = (yaw) => [0, Math.sin(yaw * 0.5), 0, Math.cos(yaw * 0.5)];
       add(gingerCat, transform4(decorations.ginger, yawRotation(-0.7), [1, 1, 1]), WHITE);
       add(charcoalCat, transform4(decorations.charcoal, yawRotation(1.2), [1, 1, 1]), WHITE);
+      add(rat, transform4(decorations.rat, yawRotation(-2.1), [1, 1, 1]), WHITE);
       add(car, transform4(decorations.car, yawRotation(-0.45), [1, 1, 1]), WHITE);
       add(bicycle, transform4(decorations.bicycle, yawRotation(0.85), [1, 1, 1]), WHITE);
     }

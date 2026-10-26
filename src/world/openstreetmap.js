@@ -9,6 +9,7 @@ const MAX_FEATURES = 2500;
 const MAX_BUILDING_COLLIDERS = 256;
 const MAX_PLAYABLE_EXTENT_METERS = 54;
 const MAX_PROCEDURAL_TREES = 32;
+const MAX_PROCEDURAL_RATS = 12;
 const MESH_VERTEX_STRIDE = 11;
 const MAX_SOURCE_ELEMENTS = 30000;
 const MAX_SOURCE_COORDINATES = 300000;
@@ -509,6 +510,7 @@ function compileMeshes(features, seed) {
     water: geometryChunks(water, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget),
     buildings: geometryChunks(buildings, (mesh, feature) => drawAreaMesh(mesh, feature, seed), budget),
     trees: [],
+    rats: [],
   };
   if (!greenery.length || budget.vertices >= MAX_TOTAL_SCENE_VERTICES) return meshes;
 
@@ -527,6 +529,7 @@ function compileMeshes(features, seed) {
     feature.tags.leisure === "park" || feature.tags.leisure === "garden" || feature.tags.landuse === "grass" || feature.tags.landuse === "meadow",
   );
   const mergedTrees = new MeshBuilder();
+  const treeLocations = [];
   let treeCount = 0;
   let treeBudgetFull = false;
   for (const feature of wooded) {
@@ -550,6 +553,7 @@ function compileMeshes(features, seed) {
           break;
         }
         mergedTrees.append(tree.geometry, [point[0], 0, point[1]], 0.68 + random() * 0.34);
+        treeLocations.push(point);
         treeCount++;
       }
       if (treeBudgetFull || budget.vertices + mergedTrees.vertices.length / MESH_VERTEX_STRIDE >= MAX_TOTAL_SCENE_VERTICES) break;
@@ -561,7 +565,68 @@ function compileMeshes(features, seed) {
     budget.vertices += geometry.vertices.length / geometry.stride;
     meshes.trees.push(geometry);
   }
+
+  const mergedRats = new MeshBuilder();
+  const ratLocations = [];
+  let ratCount = 0;
+  let ratBudgetFull = false;
+  const coats = ["brown", "cream", "charcoal", "russet"];
+  for (const feature of wooded) {
+    const xs = feature.polygon.map(([x]) => x);
+    const zs = feature.polygon.map(([, z]) => z);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    const spacing = 4.4;
+    const random = createRng(deriveFeatureSeed(seed, `rat-layout:${feature.id}`));
+    for (let z = minZ + spacing * 0.5; z < maxZ && ratCount < MAX_PROCEDURAL_RATS; z += spacing) {
+      for (let x = minX + spacing * 0.5; x < maxX && ratCount < MAX_PROCEDURAL_RATS; x += spacing) {
+        const point = [x + (random() - 0.5) * spacing * 0.48, z + (random() - 0.5) * spacing * 0.48];
+        if (!pointInPolygon(point, feature.polygon)) continue;
+        if (occupiedByBuildings.some((box) => point[0] >= box.minX && point[0] <= box.maxX && point[1] >= box.minZ && point[1] <= box.maxZ)) continue;
+        if (treeLocations.some((tree) => pointDistanceSquared(point, tree) < 2.1 ** 2)) continue;
+        if (ratLocations.some((rat) => pointDistanceSquared(point, rat) < 2.8 ** 2)) continue;
+        const rat = createAsset("rat", deriveFeatureSeed(seed, `rat:${feature.id}:${ratCount}`), {
+          coat: coats[Math.floor(random() * coats.length)],
+          size: 0.34 + random() * 0.1,
+        });
+        const vertices = rat.geometry.vertices.length / MESH_VERTEX_STRIDE;
+        if (budget.vertices + mergedRats.vertices.length / MESH_VERTEX_STRIDE + vertices > MAX_TOTAL_SCENE_VERTICES) {
+          ratBudgetFull = true;
+          break;
+        }
+        appendRotated(mergedRats, rat.geometry, [point[0], 0, point[1]], random() * Math.PI * 2);
+        ratLocations.push(point);
+        ratCount++;
+      }
+      if (ratBudgetFull || ratCount >= MAX_PROCEDURAL_RATS) break;
+    }
+    if (ratBudgetFull || ratCount >= MAX_PROCEDURAL_RATS) break;
+  }
+  if (ratCount) {
+    const geometry = mergedRats.build();
+    budget.vertices += geometry.vertices.length / geometry.stride;
+    meshes.rats.push(geometry);
+  }
   return meshes;
+}
+
+function appendRotated(builder, geometry, offset, angle) {
+  const vertices = new Float32Array(geometry.vertices);
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  for (let i = 0; i < vertices.length; i += geometry.stride) {
+    const x = vertices[i];
+    const z = vertices[i + 2];
+    const nx = vertices[i + 3];
+    const nz = vertices[i + 5];
+    vertices[i] = x * cosine + z * sine;
+    vertices[i + 2] = -x * sine + z * cosine;
+    vertices[i + 3] = nx * cosine + nz * sine;
+    vertices[i + 5] = -nx * sine + nz * cosine;
+  }
+  builder.append({ vertices, indices: geometry.indices, stride: geometry.stride }, offset);
 }
 
 function pointInPolygon(point, polygon) {

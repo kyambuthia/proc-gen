@@ -6,6 +6,7 @@ import "./car.js";
 import "./bicycle.js";
 import "./human.js";
 import "./water.js";
+import "./rat.js";
 
 export {
   createAsset,
@@ -22,3 +23,4 @@ export { createCar } from "./car.js";
 export { createBicycle } from "./bicycle.js";
 export { createHuman } from "./human.js";
 export { createWater } from "./water.js";
+export { createRat } from "./rat.js";

@@ -16,12 +16,13 @@ const arrays = (asset) => ({
 });
 
 test("built-in generators produce repeatable geometry from a type and seed", () => {
-  assert.deepEqual(listAssetTypes(), ["bicycle", "car", "cat", "grove", "human", "rock", "rock-field", "tree", "water"]);
+  assert.deepEqual(listAssetTypes(), ["bicycle", "car", "cat", "grove", "human", "rat", "rock", "rock-field", "tree", "water"]);
   for (const [type, params] of [
     ["bicycle", { style: "mountain", paint: "coral", size: 1.1 }],
     ["car", { paint: "coral", size: 1.1 }],
     ["cat", { coat: "cream", size: 0.9 }],
     ["human", { style: "festival", palette: "earth", hairStyle: "bun" }],
+    ["rat", { coat: "russet", size: 0.8 }],
     ["tree", { variant: "broadleaf" }],
     ["grove", { count: 5 }],
     ["rock", { variant: "ochre", size: 1.25 }],
@@ -84,12 +85,18 @@ test("human asset geometry, motion, and collision share the active ragdoll rig",
 
 test("animal and vehicle assets declare motion and simplified colliders", () => {
   const cat = createAsset("cat", 91, { coat: "ginger" });
+  const rat = createAsset("rat", 94, { coat: "charcoal", size: 0.7 });
   const car = createAsset("car", 92, { paint: "lagoon" });
   const bicycle = createAsset("bicycle", 93, { style: "city" });
   assert.equal(cat.spec.motion.kind, "wind-driven-tail");
   assert.equal(cat.spec.collider.kind, "compound");
   assert.ok(cat.spec.collider.children.length >= 6);
   assert.ok(Array.from(cat.geometry.vertices).some((_, i, values) => i % cat.geometry.stride === 9 && values[i] > 0.9));
+  assert.equal(rat.spec.motion.kind, "wind-driven-tail");
+  assert.equal(rat.spec.motion.gait, "scurry");
+  assert.equal(rat.spec.collider.kind, "compound");
+  assert.equal(rat.spec.collider.children.length, 6);
+  assert.ok(Array.from(rat.geometry.vertices).some((_, i, values) => i % rat.geometry.stride === 9 && values[i] > 0.9));
   assert.equal(car.spec.motion.kind, "vehicle");
   assert.equal(car.spec.motion.wheels.length, 4);
   assert.equal(car.spec.collider.kind, "compound");
