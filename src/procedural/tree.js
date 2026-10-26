@@ -100,7 +100,7 @@ function addCone(mesh, centerY, radius, height, color, segments = 8, wind = 0.4)
   }
 }
 
-function buildCrown(mesh, rng, variant, style, crownY, height, spread) {
+function buildCrown(mesh, rng, variant, style, crownY, height, spread, trunkRadius) {
   const palette = LEAVES[variant];
   const count = style.clusters[0] + Math.floor(rng() * (style.clusters[1] - style.clusters[0] + 1));
   if (style.crownKind === "bamboo") {
@@ -409,7 +409,7 @@ export function createTree(seed, { variant = "broadleaf" } = {}) {
     }
   }
 
-  buildCrown(mesh, rng, variant, style, crownY, height, spread);
+  buildCrown(mesh, rng, variant, style, crownY, height, spread, trunkRadius);
   const geometry = mesh.build();
   const crownHeight = height + (variant === "evergreen" || variant === "cypress" || variant === "bamboo" || variant === "sugi" ? 0.9 : 0.72);
   return {
