@@ -4,7 +4,7 @@
 
 The browser renderer uses the WebGL 2 API and GLSL ES 3.00 directly. WebGL 2 exposes much of OpenGL ES 3.0, which is the shared browser target for desktop and mobile. Rendering and the playable page do not depend on Three.js, React Three Fiber, or a scene graph.
 
-The first vertical slice is available at `/graphics-lab.html`: deterministic tree geometry, a merged ground-and-grove mesh, a compact painterly shader, and direct GPU buffer/program management. The playable page now uses the same renderer, with instanced meshes for ragdoll bodies and scenery. It uses no textures.
+The first vertical slice is available at `/graphics-lab.html`: deterministic tree geometry, a merged ground-and-grove mesh, a compact painterly shader, and direct GPU buffer/program management. `/asset-lab.html` is the asset foundry for building any registered asset from a seed, inspecting its motion and collision recipe, and importing or exporting portable JSON and GLB. Both use the same direct WebGL 2 renderer. The playable page uses it with instanced meshes for ragdoll bodies and scenery. It uses no textures.
 
 ## Asset contract
 
