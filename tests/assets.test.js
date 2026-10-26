@@ -4,8 +4,10 @@ import { HUMANOID_FOOT_LIFT, HUMANOID_JOINTS, HUMANOID_PARTS } from "../src/proc
 import {
   createAsset,
   deserializeAsset,
+  exportAssetGlb,
   listAssetTypes,
   rebuildAsset,
+  rebuildAssetFromGlb,
   serializeAsset,
 } from "../src/procedural/assets.js";
 
@@ -118,6 +120,29 @@ test("asset specs round-trip and rebuild without serializing GPU geometry", () =
   assert.deepEqual(arrays(rebuilt), arrays(asset));
   assert.equal(serialized.includes("vertices"), false);
   assert.equal(serialized.includes("indices"), false);
+});
+
+test("GLB export is standard, keeps shader channels, and rebuilds its portable asset recipe", () => {
+  const asset = createAsset("water", "portable-stream", { shape: "river", width: 3.5, depth: 16 });
+  const glb = exportAssetGlb(asset);
+  const bytes = new Uint8Array(glb);
+  const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  assert.equal(header.getUint32(0, true), 0x46546c67);
+  assert.equal(header.getUint32(4, true), 2);
+  assert.equal(header.getUint32(8, true), bytes.byteLength);
+  const jsonLength = header.getUint32(12, true);
+  assert.equal(header.getUint32(16, true), 0x4e4f534a);
+  const document = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength)).trimEnd());
+  const primitive = document.meshes[0].primitives[0];
+  assert.ok("COLOR_0" in primitive.attributes, "portable meshes retain vertex pigments");
+  assert.ok("_PROCGEN_WIND" in primitive.attributes, "wind weights are preserved as a custom vertex channel");
+  assert.ok("_PROCGEN_SURFACE" in primitive.attributes, "water surface ids are preserved as a custom vertex channel");
+  assert.deepEqual(document.asset.extras.proceduralAsset, asset.spec);
+  assert.equal(document.accessors[4].count, asset.geometry.vertices.length / asset.geometry.stride);
+  const imported = rebuildAssetFromGlb(glb);
+  assert.deepEqual(imported.spec, asset.spec);
+  assert.deepEqual(arrays(imported), arrays(asset));
+  assert.throws(() => rebuildAssetFromGlb(bytes.subarray(0, bytes.length - 1)), /declared length/);
 });
 
 test("rock facets keep outward winding and per-face normals", () => {

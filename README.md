@@ -24,7 +24,9 @@ mobile hardware with OpenGL ES 3.0 class support.
 
 Procedural assets use a seeded registry: `createAsset(type, seed, params)` builds geometry and a
 serializable spec; `serializeAsset` and `rebuildAsset` save and restore that recipe without storing
-GPU buffers. Current types are `tree`, `grove`, `rock`, `rock-field`, `cat`, `rat`, `human`, `car`, `bicycle`, and `water`.
+GPU buffers. `exportAssetGlb` writes standard GLB 2.0 geometry with vertex pigments and procedural
+shader channels; `rebuildAssetFromGlb` restores registered assets from the embedded portable recipe.
+Current types are `tree`, `grove`, `rock`, `rock-field`, `cat`, `rat`, `human`, `car`, `bicycle`, and `water`.
 Generated ponds, meandering rivers, and open water share the renderer's animated GLSL wave surface.
 Human assets carry a portable appearance, a compound collider, and the same versioned biped rig
 used by the Jolt active ragdolls; the running game applies each generated palette to its moving body parts.

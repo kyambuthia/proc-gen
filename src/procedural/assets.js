@@ -24,3 +24,4 @@ export { createBicycle } from "./bicycle.js";
 export { createHuman } from "./human.js";
 export { createWater } from "./water.js";
 export { createRat } from "./rat.js";
+export { exportAssetGlb, rebuildAssetFromGlb } from "./gltf.js";
