@@ -1,4 +1,7 @@
-const STRIDE = 10; // position 3, normal 3, linear color 3, wind weight 1
+export const SURFACE_DEFAULT = 0;
+export const SURFACE_WATER = 1;
+
+const STRIDE = 11; // position 3, normal 3, linear color 3, wind weight 1, surface id 1
 
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -14,9 +17,9 @@ export class MeshBuilder {
     this.indices = [];
   }
 
-  vertex(position, normal, color, wind = 0) {
+  vertex(position, normal, color, wind = 0, surface = SURFACE_DEFAULT) {
     const index = this.vertices.length / STRIDE;
-    this.vertices.push(...position, ...normal, ...color, wind);
+    this.vertices.push(...position, ...normal, ...color, wind, surface);
     return index;
   }
 
@@ -26,7 +29,7 @@ export class MeshBuilder {
 
   // Add an isolated, flat-shaded triangle and orient it away from `origin`.
   // Separate vertices let adjacent facets keep their own normals and pigments.
-  addFlatTriangle(points, color, origin = [0, 0, 0], wind = 0) {
+  addFlatTriangle(points, color, origin = [0, 0, 0], wind = 0, surface = SURFACE_DEFAULT) {
     let [a, b, c] = points;
     const outward = [
       (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]),
@@ -43,15 +46,15 @@ export class MeshBuilder {
     const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
     const normal = normalize(cross(ab, ac));
     const first = this.vertices.length / STRIDE;
-    this.vertex(a, normal, color, wind);
-    this.vertex(b, normal, color, wind);
-    this.vertex(c, normal, color, wind);
+    this.vertex(a, normal, color, wind, surface);
+    this.vertex(b, normal, color, wind, surface);
+    this.vertex(c, normal, color, wind, surface);
     this.triangle(first, first + 1, first + 2);
   }
 
-  addQuad(points, color, normal, wind = 0) {
+  addQuad(points, color, normal, wind = 0, surface = SURFACE_DEFAULT) {
     const first = this.vertices.length / STRIDE;
-    for (const point of points) this.vertex(point, normal, color, wind);
+    for (const point of points) this.vertex(point, normal, color, wind, surface);
     this.triangle(first, first + 1, first + 2);
     this.triangle(first, first + 2, first + 3);
   }
@@ -187,7 +190,7 @@ export class MeshBuilder {
     for (let i = 0; i < data.length; i += STRIDE) {
       this.vertices.push(
         data[i] * scale + offset[0], data[i + 1] * scale + offset[1], data[i + 2] * scale + offset[2],
-        data[i + 3], data[i + 4], data[i + 5], data[i + 6], data[i + 7], data[i + 8], data[i + 9],
+        data[i + 3], data[i + 4], data[i + 5], data[i + 6], data[i + 7], data[i + 8], data[i + 9], data[i + 10],
       );
     }
     for (const i of mesh.indices) this.indices.push(base + i);

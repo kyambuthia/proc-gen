@@ -3,6 +3,7 @@ import "./tree.js";
 import "./rock.js";
 import "./cat.js";
 import "./car.js";
+import "./water.js";
 
 export {
   createAsset,
@@ -16,3 +17,4 @@ export { createGrove, createTree } from "./tree.js";
 export { createRock, createRockField } from "./rock.js";
 export { createCat } from "./cat.js";
 export { createCar } from "./car.js";
+export { createWater } from "./water.js";

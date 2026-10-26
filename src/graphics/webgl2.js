@@ -50,7 +50,7 @@ export function uploadMesh(gl, mesh) {
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
   const stride = mesh.stride * Float32Array.BYTES_PER_ELEMENT;
-  for (const [location, size, offset] of [[0, 3, 0], [1, 3, 3], [2, 3, 6], [3, 1, 9]]) {
+  for (const [location, size, offset] of [[0, 3, 0], [1, 3, 3], [2, 3, 6], [3, 1, 9], [9, 1, 10]]) {
     gl.enableVertexAttribArray(location);
     gl.vertexAttribPointer(location, size, gl.FLOAT, false, stride, offset * Float32Array.BYTES_PER_ELEMENT);
   }

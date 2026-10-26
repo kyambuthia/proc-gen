@@ -4,6 +4,7 @@ import { compileProgram, uploadMesh } from "./graphics/webgl2.js";
 import { createRng } from "./procedural/seed.js";
 import { MeshBuilder } from "./procedural/mesh-builder.js";
 import { createGrove } from "./procedural/tree.js";
+import { createWater } from "./procedural/water.js";
 
 const canvas = document.querySelector("#view");
 const message = document.querySelector("#message");
@@ -53,6 +54,8 @@ if (!gl) {
     }
     const grove = createGrove("first-painterly-grove", 9);
     scene.append(grove.geometry);
+    const pond = createWater("first-painterly-water", { shape: "pond", width: 8, depth: 5, palette: "tropical" });
+    scene.append(pond.geometry, [7.5, 0.015, -2]);
     return scene.build();
   }
 

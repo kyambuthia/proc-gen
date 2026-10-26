@@ -15,7 +15,7 @@ const arrays = (asset) => ({
 });
 
 test("built-in generators produce repeatable geometry from a type and seed", () => {
-  assert.deepEqual(listAssetTypes(), ["car", "cat", "grove", "rock", "rock-field", "tree"]);
+  assert.deepEqual(listAssetTypes(), ["car", "cat", "grove", "rock", "rock-field", "tree", "water"]);
   for (const [type, params] of [
     ["car", { paint: "coral", size: 1.1 }],
     ["cat", { coat: "cream", size: 0.9 }],
@@ -23,6 +23,7 @@ test("built-in generators produce repeatable geometry from a type and seed", () 
     ["grove", { count: 5 }],
     ["rock", { variant: "ochre", size: 1.25 }],
     ["rock-field", { count: 12, innerRadius: 20, outerRadius: 27 }],
+    ["water", { shape: "river", width: 5, depth: 20, palette: "tropical" }],
   ]) {
     const first = createAsset(type, "painterly-path", params);
     const second = createAsset(type, "painterly-path", params);
@@ -33,6 +34,17 @@ test("built-in generators produce repeatable geometry from a type and seed", () 
     assert.deepEqual(rebuilt.spec, first.spec, `${type} spec changed after import`);
     assert.deepEqual(arrays(rebuilt), arrays(first), `${type} geometry changed after import`);
   }
+});
+
+test("water assets carry a shader surface id and a portable wave recipe", () => {
+  const water = createAsset("water", "painted-river", { shape: "river", width: 4, depth: 18 });
+  assert.equal(water.spec.motion.kind, "shader-wave");
+  assert.equal(water.spec.collider.kind, "none");
+  assert.ok(water.spec.measurements.tiles > 0);
+  for (let i = 0; i < water.geometry.vertices.length; i += water.geometry.stride) {
+    assert.equal(water.geometry.vertices[i + 10], 1, "water vertices must select the animated water shader path");
+  }
+  assert.throws(() => createAsset("water", 1, { shape: "lake" }), /Unknown water shape/);
 });
 
 test("animal and vehicle assets declare motion and simplified colliders", () => {

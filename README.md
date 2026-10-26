@@ -18,13 +18,14 @@ gives the same layout. With no seed you get the hand-made classic arena.
 ## Direct graphics foundation
 
 The playable page and `/graphics-lab.html` both use the WebGL 2 API directly. The game batches
-ragdoll parts and scenery as instanced meshes; the lab builds a deterministic grove and ground as a
-single merged draw. Neither path uses a scene graph or texture lookups. The target is desktop and
+ragdoll parts and scenery as instanced meshes; the lab builds a deterministic grove, pond, and ground
+as a single merged draw. Neither path uses a scene graph or texture lookups. The target is desktop and
 mobile hardware with OpenGL ES 3.0 class support.
 
 Procedural assets use a seeded registry: `createAsset(type, seed, params)` builds geometry and a
 serializable spec; `serializeAsset` and `rebuildAsset` save and restore that recipe without storing
-GPU buffers. Current types are `tree`, `grove`, `rock`, `rock-field`, `cat`, and `car`.
+GPU buffers. Current types are `tree`, `grove`, `rock`, `rock-field`, `cat`, `car`, and `water`.
+Generated ponds, meandering rivers, and open water share the renderer's animated GLSL wave surface.
 
 The OpenStreetMap adapter in `src/world/openstreetmap.js` compiles bounded Overpass data into seeded
 road, river, water, green-space, and building meshes. Choose **Play an OSM patch** in the game to
@@ -85,8 +86,10 @@ civilians run away.
 | `src/raw-game.js` | Direct-render game loop, keyboard/touch controls, OSM patch fetch/import/export, HUD, minimap, and combat |
 | `src/graphics/world-renderer.js` | Raw WebGL 2 batches for the playable scene and imported map chunks |
 | `src/graphics/webgl2.js` | Shader compilation, GPU buffers, and instanced mesh upload |
+| `src/graphics/painterly-shader.js` | Direct GLSL ES 3.00 shaders for painterly lighting, wind sway, and animated water |
 | `src/procedural/mesh-builder.js` | CPU mesh construction for boxes, ellipsoids, capsules, and merged assets |
-| `src/procedural/assets.js` | Public registry and JSON import/export for generated asset recipes |
+| `src/procedural/assets.js` | Public registry and JSON import/export for generated asset recipes, including water surfaces |
+| `src/procedural/water.js` | Seeded pond, meandering river, and open-water geometry with a portable shader-wave recipe |
 | `src/world/openstreetmap.js` | Bounded Overpass requests, OSM way parsing, mesh compilation, building colliders, and portable scene import/export |
 
 Each NPC brain returns the same `{ x, z, run, jump }` input the player produces, so a body does not

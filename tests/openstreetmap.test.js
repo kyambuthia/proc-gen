@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createNav } from "../src/nav.js";
+import { SURFACE_WATER } from "../src/procedural/mesh-builder.js";
 import {
   createOsmScene,
   createOsmObstacleBoxes,
@@ -84,6 +85,11 @@ test("OSM ways become seeded, bounded meshes with portable attribution", () => {
   assert.ok(scene.meshes.roads.length > 0);
   assert.ok(scene.meshes.buildings.length > 0);
   assert.ok(scene.meshes.trees.length > 0, "mapped park receives seeded procedural trees");
+  for (const mesh of [...scene.meshes.water, ...scene.meshes.waterways]) {
+    for (let i = 0; i < mesh.vertices.length; i += mesh.stride) {
+      assert.equal(mesh.vertices[i + 10], SURFACE_WATER, "mapped water must use the animated water shader path");
+    }
+  }
   let totalVertices = 0;
   for (const chunks of Object.values(scene.meshes)) {
     for (const mesh of chunks) {

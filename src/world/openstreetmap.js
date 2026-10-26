@@ -1,4 +1,4 @@
-import { MeshBuilder } from "../procedural/mesh-builder.js";
+import { MeshBuilder, SURFACE_DEFAULT, SURFACE_WATER } from "../procedural/mesh-builder.js";
 import { createRng, hashSeed } from "../procedural/seed.js";
 import { createAsset } from "../procedural/assets.js";
 
@@ -9,7 +9,7 @@ const MAX_FEATURES = 2500;
 const MAX_BUILDING_COLLIDERS = 256;
 const MAX_PLAYABLE_EXTENT_METERS = 54;
 const MAX_PROCEDURAL_TREES = 32;
-const MESH_VERTEX_STRIDE = 10;
+const MESH_VERTEX_STRIDE = 11;
 const MAX_SOURCE_ELEMENTS = 30000;
 const MAX_SOURCE_COORDINATES = 300000;
 const MAX_POINTS_PER_WAY = 4096;
@@ -420,7 +420,7 @@ function roadColor(feature) {
 
 function drawLineMesh(mesh, feature) {
   const color = roadColor(feature);
-  const y = feature.kind === "road" ? 0.045 : 0.025;
+  const y = feature.kind === "road" ? 0.045 : 0.07;
   for (const { points, width } of feature.paths) {
     const simplified = simplifyToBudget(points, 0.2, MAX_POLYGON_POINTS * 4);
     for (let i = 1; i < simplified.length; i++) {
@@ -437,8 +437,9 @@ function drawLineMesh(mesh, feature) {
       const p2 = [b[0] - sx, y, b[1] - sz];
       const p3 = [a[0] - sx, y, a[1] - sz];
       const up = [0, -1, 0];
-      mesh.addFlatTriangle([p0, p1, p2], color, up);
-      mesh.addFlatTriangle([p0, p2, p3], color, up);
+      const surface = feature.kind === "waterway" ? SURFACE_WATER : SURFACE_DEFAULT;
+      mesh.addFlatTriangle([p0, p1, p2], color, up, 0, surface);
+      mesh.addFlatTriangle([p0, p2, p3], color, up, 0, surface);
     }
   }
 }
@@ -462,7 +463,8 @@ function drawAreaMesh(mesh, feature, seed) {
     : areaColor(feature, seed);
   if (feature.kind !== "building") {
     for (const triangle of triangulateOsmPolygon(polygon)) {
-      mesh.addFlatTriangle(triangle.map(([x, z]) => [x, feature.kind === "water" ? 0.025 : 0.012, z]), color, [0, -1, 0]);
+      const surface = feature.kind === "water" ? SURFACE_WATER : SURFACE_DEFAULT;
+      mesh.addFlatTriangle(triangle.map(([x, z]) => [x, feature.kind === "water" ? 0.07 : 0.012, z]), color, [0, -1, 0], 0, surface);
     }
     return;
   }

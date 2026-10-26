@@ -81,8 +81,8 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
   const gingerCat = getMesh("cat:ginger", () => createAsset("cat", seed, { coat: "ginger" }).geometry);
   const charcoalCat = getMesh("cat:charcoal", () => createAsset("cat", `${seed}:night`, { coat: "charcoal", size: 0.9 }).geometry);
   const car = getMesh("car", () => createAsset("car", seed, { paint: "lagoon" }).geometry);
-  const supportsInstancing = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) >= 9;
-  if (!supportsInstancing) throw new Error("WebGL 2 reports fewer vertex attributes than this renderer needs.");
+  const supportsInstancing = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) >= 10;
+  if (!supportsInstancing) throw new Error("WebGL 2 reports fewer than 10 vertex attributes; this renderer needs OpenGL ES 3.0 class support.");
 
   gl.enable(gl.DEPTH_TEST);
   gl.enable(gl.CULL_FACE);
@@ -93,6 +93,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
   let lost = false;
   let decorations = null;
   let osmMeshes = [];
+  const motionPreference = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   const onContextLost = (event) => {
     event.preventDefault();
     lost = true;
@@ -249,9 +250,9 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
     gl.useProgram(program);
     gl.uniformMatrix4fv(uniforms.viewProjection, false, viewProjection);
     gl.uniform3fv(uniforms.viewPosition, eye);
-    gl.uniform1f(uniforms.time, now);
+    gl.uniform1f(uniforms.time, motionPreference?.matches ? 0 : now);
     gl.uniform2f(uniforms.windDirection, 0.82, 0.57);
-    gl.uniform1f(uniforms.windStrength, 0.2);
+    gl.uniform1f(uniforms.windStrength, motionPreference?.matches ? 0 : 0.2);
     for (const [mesh, instances] of groups) {
       mesh.setInstances(instances);
       gl.bindVertexArray(mesh.vao);
