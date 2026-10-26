@@ -15,8 +15,10 @@ const arrays = (asset) => ({
 });
 
 test("built-in generators produce repeatable geometry from a type and seed", () => {
-  assert.deepEqual(listAssetTypes(), ["grove", "rock", "rock-field", "tree"]);
+  assert.deepEqual(listAssetTypes(), ["car", "cat", "grove", "rock", "rock-field", "tree"]);
   for (const [type, params] of [
+    ["car", { paint: "coral", size: 1.1 }],
+    ["cat", { coat: "cream", size: 0.9 }],
     ["tree", { variant: "broadleaf" }],
     ["grove", { count: 5 }],
     ["rock", { variant: "ochre", size: 1.25 }],
@@ -27,7 +29,23 @@ test("built-in generators produce repeatable geometry from a type and seed", () 
     assert.deepEqual(first.spec, second.spec, `${type} spec changed for a stable seed`);
     assert.deepEqual(arrays(first), arrays(second), `${type} mesh changed for a stable seed`);
     assert.ok(first.geometry.vertices.length / first.geometry.stride <= 65535, `${type} exceeds the 16-bit mesh budget`);
+    const rebuilt = rebuildAsset(serializeAsset(first));
+    assert.deepEqual(rebuilt.spec, first.spec, `${type} spec changed after import`);
+    assert.deepEqual(arrays(rebuilt), arrays(first), `${type} geometry changed after import`);
   }
+});
+
+test("animal and vehicle assets declare motion and simplified colliders", () => {
+  const cat = createAsset("cat", 91, { coat: "ginger" });
+  const car = createAsset("car", 92, { paint: "lagoon" });
+  assert.equal(cat.spec.motion.kind, "wind-driven-tail");
+  assert.equal(cat.spec.collider.kind, "compound");
+  assert.ok(cat.spec.collider.children.length >= 6);
+  assert.ok(Array.from(cat.geometry.vertices).some((_, i, values) => i % cat.geometry.stride === 9 && values[i] > 0.9));
+  assert.equal(car.spec.motion.kind, "vehicle");
+  assert.equal(car.spec.motion.wheels.length, 4);
+  assert.equal(car.spec.collider.kind, "compound");
+  assert.equal(car.spec.collider.children.length, 2);
 });
 
 test("asset specs round-trip and rebuild without serializing GPU geometry", () => {
@@ -70,7 +88,7 @@ test("rock facets keep outward winding and per-face normals", () => {
 });
 
 test("asset import rejects unsupported types and malformed seeds", () => {
-  assert.throws(() => createAsset("car", 1), /Unknown procedural asset type/);
+  assert.throws(() => createAsset("camel", 1), /Unknown procedural asset type/);
   assert.throws(() => rebuildAsset({ type: "tree", version: 1, seed: -1, params: {}, motion: {}, collider: {} }), /uint32 seed/);
   assert.throws(() => rebuildAsset({ type: "tree", version: 9, seed: 1, params: {}, motion: {}, collider: {} }), /schema v9/);
 });

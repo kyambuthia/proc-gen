@@ -24,7 +24,7 @@ mobile hardware with OpenGL ES 3.0 class support.
 
 Procedural assets use a seeded registry: `createAsset(type, seed, params)` builds geometry and a
 serializable spec; `serializeAsset` and `rebuildAsset` save and restore that recipe without storing
-GPU buffers. Current types are `tree`, `grove`, `rock`, and `rock-field`.
+GPU buffers. Current types are `tree`, `grove`, `rock`, `rock-field`, `cat`, and `car`.
 
 ## Controls
 

@@ -78,6 +78,9 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
     innerRadius: 23,
     outerRadius: 32,
   }).geometry);
+  const gingerCat = getMesh("cat:ginger", () => createAsset("cat", seed, { coat: "ginger" }).geometry);
+  const charcoalCat = getMesh("cat:charcoal", () => createAsset("cat", `${seed}:night`, { coat: "charcoal", size: 0.9 }).geometry);
+  const car = getMesh("car", () => createAsset("car", seed, { paint: "lagoon" }).geometry);
   const supportsInstancing = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) >= 9;
   if (!supportsInstancing) throw new Error("WebGL 2 reports fewer vertex attributes than this renderer needs.");
 
@@ -88,6 +91,7 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
   gl.disable(gl.BLEND);
 
   let lost = false;
+  let decorations = null;
   const onContextLost = (event) => {
     event.preventDefault();
     lost = true;
@@ -116,6 +120,44 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
       return b.build();
     });
     return { mesh, scale: [1, 1, 1] };
+  }
+
+  function placeDecorations(world) {
+    const candidates = [
+      [0, -18], [16, -15], [-16, -15], [18, 8], [-18, 8],
+      [11, 18], [-11, 18], [0, 19], [20, -2], [-20, -2],
+      [25, 0], [-25, 0], [0, 26], [0, -26],
+    ];
+    const rng = createRng(`${seed}:decorations`);
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+    const occupied = [];
+    const take = (half) => {
+      const position = candidates.find(([x, z]) => {
+        const spawnArea = Math.abs(x) < 8 && z > -4 && z < 8;
+        if (spawnArea) return false;
+        const clearObstacles = world.obstacles.every((obstacle) =>
+          Math.abs(x - obstacle.pos[0]) >= half[0] + obstacle.half[0] + 0.7 ||
+          Math.abs(z - obstacle.pos[2]) >= half[1] + obstacle.half[2] + 0.7,
+        );
+        const clearProps = occupied.every((other) =>
+          Math.abs(x - other.position[0]) >= half[0] + other.half[0] + 1.4 ||
+          Math.abs(z - other.position[1]) >= half[1] + other.half[1] + 1.4,
+        );
+        return clearObstacles && clearProps;
+      });
+      const fallback = [[34, 34], [34, -34], [-34, 34], [-34, -34]][occupied.length % 4];
+      const chosen = position ?? fallback;
+      occupied.push({ position: chosen, half });
+      return [chosen[0], 0, chosen[1]];
+    };
+    return {
+      car: take([2.3, 2.7]),
+      ginger: take([1.4, 1.4]),
+      charcoal: take([1.5, 1.2]),
+    };
   }
 
   function render(world, game, now) {
@@ -163,6 +205,11 @@ export function createWorldRenderer(canvas, { seed = "classic", onError = () => 
     add(grove, transform4([25, 0, -19], [0, 0, 0, 1], [1, 1, 1]), WHITE);
     add(grove, transform4([-25, 0, 19], [0, 1, 0, 0], [1, 1, 1]), WHITE);
     add(rockField, transform4([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]), WHITE);
+    decorations ??= placeDecorations(world);
+    const yawRotation = (yaw) => [0, Math.sin(yaw * 0.5), 0, Math.cos(yaw * 0.5)];
+    add(gingerCat, transform4(decorations.ginger, yawRotation(-0.7), [1, 1, 1]), WHITE);
+    add(charcoalCat, transform4(decorations.charcoal, yawRotation(1.2), [1, 1, 1]), WHITE);
+    add(car, transform4(decorations.car, yawRotation(-0.45), [1, 1, 1]), WHITE);
 
     const hero = game.hero;
     const focus = hero ? hero.state.pos : game.player.read();
